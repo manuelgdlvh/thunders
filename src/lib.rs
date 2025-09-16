@@ -69,13 +69,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    hooks::GameHooks,
+    core::hooks::GameHooks,
     protocol::{InputMessage, NetworkProtocol, SessionManager},
     runtime::{GameRuntime, GameRuntimeAnyHandle, GameRuntimeHandle},
     schema::{DeSerialize, Schema},
 };
 
-pub mod hooks;
+pub mod core;
 pub mod protocol;
 pub mod runtime;
 pub mod schema;

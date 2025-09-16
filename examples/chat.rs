@@ -1,9 +1,9 @@
 use thunders::{
     MultiPlayer,
-    hooks::GameHooks,
-    protocol::WebSocketProtocol,
-    runtime::SyncGameRuntime,
-    schema::{DeSerialize, Json},
+    core::hooks::GameHooks,
+    protocol::ws::WebSocketProtocol,
+    runtime::sync::SyncGameRuntime,
+    schema::{DeSerialize, json::Json},
 };
 
 #[tokio::main]
