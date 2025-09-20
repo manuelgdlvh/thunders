@@ -1,13 +1,33 @@
 // Send actions and update the state. Each tick returns the delta.
 
+use std::sync::Arc;
+
+use crate::core::context::PlayerContext;
+
 pub trait GameHooks: Send + 'static {
     type Delta: Send;
     type Action: Send;
     type Options: Default;
 
     fn build(options: Self::Options) -> Self;
-    fn diff(&self, actions: &[Self::Action]) -> Self::Delta;
-    fn update(&mut self, actions: Vec<Self::Action>);
-    fn merge(&self, actions: Vec<Self::Delta>) -> Vec<Self::Delta>;
+    fn diff<'a>(
+        &self,
+        connected: &[Arc<PlayerContext>],
+        actions: &[(u64, Self::Action)],
+    ) -> Vec<Diff<Self::Delta>>;
+    fn update(&mut self, actions: Vec<(u64, Self::Action)>);
     fn is_finished(&self) -> bool;
+}
+
+pub enum Diff<D> {
+    All { delta: D },
+    Target { ids: Vec<u64>, delta: D },
+}
+
+pub enum Event<H>
+where
+    H: GameHooks,
+{
+    Action(H::Action),
+    Join(Arc<PlayerContext>),
 }

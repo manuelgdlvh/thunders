@@ -38,10 +38,10 @@ impl SessionManager {
     }
 
     pub fn send(&self, player_id: u64, message: Vec<u8>) {
-        if let Ok(conns) = self.conns.read() {
-            if let Some(conn) = conns.get(&player_id) {
-                conn.send(message).unwrap();
-            }
+        if let Ok(conns) = self.conns.read()
+            && let Some(conn) = conns.get(&player_id)
+        {
+            conn.send(message).unwrap();
         }
     }
 }

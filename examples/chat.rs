@@ -1,6 +1,11 @@
+use std::sync::Arc;
+
 use thunders::{
     MultiPlayer,
-    core::hooks::GameHooks,
+    core::{
+        context::PlayerContext,
+        hooks::{Diff, GameHooks},
+    },
     protocol::ws::WebSocketProtocol,
     runtime::sync::SyncGameRuntime,
     schema::{DeSerialize, json::Json},
@@ -20,7 +25,7 @@ pub async fn main() {
 }
 
 pub struct Chat {
-    _messages: Vec<String>,
+    messages: Vec<String>,
 }
 
 impl GameHooks for Chat {
@@ -29,34 +34,37 @@ impl GameHooks for Chat {
     type Options = ();
 
     fn build(_options: Self::Options) -> Self {
-        Self { _messages: vec![] }
+        Self { messages: vec![] }
     }
 
-    fn diff(&self, _actions: &[Self::Action]) -> Self::Delta {
-        let mut messages = Vec::new();
+    fn diff<'a>(
+        &self,
+        _connected: &'a [Arc<PlayerContext>],
+        actions: &[(u64, Self::Action)],
+    ) -> Vec<Diff<ChatDiff>> {
+        let mut result = Vec::new();
 
-        for action in _actions {
+        for (_, action) in actions {
             match action {
-                ChatAction::IncomingMessage(message) => {
-                    messages.push(message.clone());
+                ChatAction::IncomingMessage(text) => {
+                    result.push(Diff::Target {
+                        ids: vec![2],
+                        delta: ChatDiff {
+                            messages: vec![text.clone()],
+                        },
+                    });
                 }
             }
         }
-
-        ChatDiff { messages }
+        result
     }
 
-    fn update(&mut self, _actions: Vec<Self::Action>) {
-        for action in _actions.into_iter() {
+    fn update(&mut self, actions: Vec<(u64, Self::Action)>) {
+        for (_, action) in actions {
             match action {
-                ChatAction::IncomingMessage(message) => {
-                    self._messages.push(message);
-                }
+                ChatAction::IncomingMessage(text) => self.messages.push(text),
             }
         }
-    }
-    fn merge(&self, _actions: Vec<Self::Delta>) -> Vec<Self::Delta> {
-        vec![]
     }
 
     fn is_finished(&self) -> bool {

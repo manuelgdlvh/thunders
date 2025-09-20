@@ -76,6 +76,26 @@ impl DeSerialize<Json> for InputMessage {
                 })
             }
 
+            "join" => {
+                let type_ = json
+                    .get("type")
+                    .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
+
+                let id = json
+                    .get("id")
+                    .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
+
+                Ok(InputMessage::Join {
+                    type_: type_
+                        .as_str()
+                        .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?
+                        .to_string(),
+                    id: id
+                        .as_str()
+                        .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?
+                        .to_string(),
+                })
+            }
             "action" => {
                 let type_ = json
                     .get("type")

@@ -4,7 +4,10 @@ use std::{
 };
 
 use crate::{
-    core::hooks::GameHooks,
+    core::{
+        context::PlayerContext,
+        hooks::{Event, GameHooks},
+    },
     protocol::SessionManager,
     schema::{DeSerialize, Schema},
 };
@@ -29,7 +32,7 @@ pub trait GameHandle<H>: Send + Sync
 where
     H: GameHooks,
 {
-    fn action(&self, action: H::Action);
+    fn event(&self, p_id: u64, event: Event<H>);
 }
 
 // Default async configurable and not with traits
@@ -63,25 +66,35 @@ where
         }
     }
 
-    pub fn register(&self, id: String, options: H::Options) {
-        let runtime = R::start(options, Arc::clone(&self.session_manager));
+    pub fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: H::Options) {
+        let r_handle = R::start(options, Arc::clone(&self.session_manager));
+        r_handle.event(cxt.id(), Event::Join(cxt));
         if let Ok(mut handlers) = self.handlers.write() {
-            handlers.insert(id, runtime);
+            handlers.insert(room_id, r_handle);
         }
     }
 
-    pub fn action(&self, id: String, action: H::Action) {
+    pub fn join(&self, cxt: Arc<PlayerContext>, room_id: String) {
         if let Ok(handlers) = self.handlers.read() {
-            if let Some(handler) = handlers.get(id.as_str()) {
-                handler.action(action);
-            }
+            handlers.get(room_id.as_str()).inspect(|handler| {
+                handler.event(cxt.id(), Event::Join(cxt));
+            });
+        }
+    }
+
+    pub fn action(&self, cxt: u64, room_id: String, action: H::Action) {
+        if let Ok(handlers) = self.handlers.read()
+            && let Some(handler) = handlers.get(room_id.as_str())
+        {
+            handler.event(cxt, Event::Action(action));
         }
     }
 }
 
 pub trait GameRuntimeAnyHandle: Send + Sync {
-    fn register(&self, id: String, options: Option<Vec<u8>>);
-    fn action(&self, id: String, action: Vec<u8>);
+    fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: Option<Vec<u8>>);
+    fn join(&self, cxt: Arc<PlayerContext>, room_id: String);
+    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>);
 }
 
 impl<R, H, S> GameRuntimeAnyHandle for GameRuntimeHandle<R, H, S>
@@ -93,17 +106,21 @@ where
     H::Options: DeSerialize<S>,
     H::Action: DeSerialize<S>,
 {
-    fn register(&self, id: String, options: Option<Vec<u8>>) {
+    fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: Option<Vec<u8>>) {
         if let Some(options) = options {
             let result = <H::Options as DeSerialize<S>>::deserialize(options).unwrap();
-            self.register(id, result);
+            self.register(cxt, room_id, result);
         } else {
-            self.register(id, H::Options::default());
+            self.register(cxt, room_id, H::Options::default());
         }
     }
 
-    fn action(&self, id: String, action: Vec<u8>) {
+    fn join(&self, cxt: Arc<PlayerContext>, room_id: String) {
+        self.join(cxt, room_id);
+    }
+
+    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) {
         let action = <H::Action as DeSerialize<S>>::deserialize(action).unwrap();
-        self.action(id, action);
+        self.action(cxt, room_id, action);
     }
 }

@@ -8,6 +8,7 @@ use tokio_tungstenite::{
 };
 
 use crate::{
+    core::context::PlayerContext,
     protocol::{InputMessage, NetworkProtocol, SessionManager},
     runtime::GameRuntimeAnyHandle,
     schema::{DeSerialize, Schema, SchemaType},
@@ -33,6 +34,7 @@ impl NetworkProtocol for WebSocketProtocol {
             let session_manager = Arc::clone(&session_manager);
             if let Ok((stream, _)) = listener.accept().await {
                 tokio::spawn(async move {
+                    let player_context;
                     let ws_stream = accept_async(stream).await.unwrap();
                     let (mut write, mut read) = ws_stream.split();
 
@@ -48,6 +50,7 @@ impl NetworkProtocol for WebSocketProtocol {
                         if let Ok(message) = <InputMessage as DeSerialize<S>>::deserialize(buffer) {
                             match message {
                                 InputMessage::Connect { id } => {
+                                    player_context = Arc::new(PlayerContext::new(id));
                                     let mut notification_channel = session_manager.connect(id);
 
                                     tokio::spawn(async move {
@@ -97,14 +100,18 @@ impl NetworkProtocol for WebSocketProtocol {
                             match message {
                                 InputMessage::Create { type_, id, options } => {
                                     if let Some(handler) = handlers.get(type_.as_str()) {
-                                        handler.register(id, options);
+                                        handler.register(Arc::clone(&player_context), id, options);
                                     }
                                 }
-                                InputMessage::Join { type_, id } => {}
+                                InputMessage::Join { type_, id } => {
+                                    if let Some(handler) = handlers.get(type_.as_str()) {
+                                        handler.join(Arc::clone(&player_context), id);
+                                    }
+                                }
                                 InputMessage::Action { type_, id, data } => {
-                                    handlers
-                                        .get(type_.as_str())
-                                        .map(|handler| handler.action(id, data));
+                                    handlers.get(type_.as_str()).inspect(|handler| {
+                                        handler.action(player_context.id(), id, data)
+                                    });
                                 }
                                 _ => {}
                             }

@@ -6,7 +6,10 @@ use std::{
 };
 
 use crate::{
-    core::hooks::GameHooks,
+    core::{
+        context::PlayerContext,
+        hooks::{Diff, Event, GameHooks},
+    },
     protocol::SessionManager,
     runtime::{GameHandle, GameRuntime},
     schema::{DeSerialize, Schema},
@@ -29,24 +32,70 @@ where
         session_manager: Arc<SessionManager>,
     ) -> Self::Handle {
         let mut hooks = H::build(options);
-        let (actions_tx, actions_rx) = mpsc::channel::<H::Action>();
+        let (actions_tx, actions_rx) = mpsc::channel::<(u64, Event<H>)>();
         let r_handle = thread::spawn(move || {
             let mut actions_buffer = Vec::new();
-            let mut now = Instant::now();
-            let tick = Duration::from_millis(1000);
+            let mut now;
+            let mut tick;
+
+            // TODO: Add passive streaming actions. This is useful for example if you create a game with a maximum duration of 1 minute, you want prcess a Stop action that is not triggered by a user and is generated after 1 minute elapsed.
+            // TODO: Add runtime hooks to handle connection, disconnection, join
+            //
+            let mut p_ids: Vec<Arc<PlayerContext>> = vec![];
             loop {
-                if let Ok(action) = actions_rx.recv_timeout(tick) {
-                    actions_buffer.push(action);
+                if let Ok(event) = actions_rx.recv() {
+                    match event.1 {
+                        Event::Action(action) => {
+                            actions_buffer.push((event.0, action));
+                            now = Instant::now();
+                            tick = Duration::from_millis(1000);
+                        }
+
+                        Event::Join(cxt) => {
+                            p_ids.push(cxt);
+                            continue;
+                        }
+                    }
+                } else {
+                    break;
                 }
 
-                if now.elapsed() >= tick {
-                    now = Instant::now();
-                    if !actions_buffer.is_empty() {
-                        let delta = hooks.diff(actions_buffer.as_slice());
-                        hooks.update(mem::take(&mut actions_buffer));
-                        session_manager.send(1, delta.serialize());
+                while let Ok(event) = actions_rx.recv_timeout(tick) {
+                    match event.1 {
+                        Event::Action(action) => {
+                            actions_buffer.push((event.0, action));
+                        }
+
+                        Event::Join(cxt) => {
+                            p_ids.push(cxt);
+                        }
+                    }
+
+                    if let Some(new_tick) = tick.checked_sub(now.elapsed()) {
+                        tick = new_tick;
+                    } else {
+                        break;
                     }
                 }
+
+                for diff in hooks.diff(p_ids.as_slice(), actions_buffer.as_slice()) {
+                    match diff {
+                        Diff::All { delta } => {
+                            let delta = delta.serialize();
+                            for p_id in p_ids.iter() {
+                                session_manager.send(p_id.id(), delta.clone());
+                            }
+                        }
+                        Diff::Target { ids, delta } => {
+                            let delta = delta.serialize();
+                            for &p_id in ids.iter() {
+                                session_manager.send(p_id, delta.clone());
+                            }
+                        }
+                    }
+                }
+
+                hooks.update(mem::take(&mut actions_buffer));
 
                 if hooks.is_finished() {
                     break;
@@ -55,7 +104,7 @@ where
         });
 
         SyncGameHandle {
-            _actions: actions_tx,
+            actions: actions_tx,
             _r_handle: r_handle,
         }
     }
@@ -64,7 +113,7 @@ pub struct SyncGameHandle<H>
 where
     H: GameHooks,
 {
-    _actions: mpsc::Sender<H::Action>,
+    actions: mpsc::Sender<(u64, Event<H>)>,
     _r_handle: JoinHandle<()>,
 }
 
@@ -72,7 +121,7 @@ impl<H> GameHandle<H> for SyncGameHandle<H>
 where
     H: GameHooks,
 {
-    fn action(&self, action: <H as GameHooks>::Action) {
-        self._actions.send(action).expect("");
+    fn event(&self, p_id: u64, event: Event<H>) {
+        self.actions.send((p_id, event)).expect("");
     }
 }
