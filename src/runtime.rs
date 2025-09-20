@@ -94,7 +94,7 @@ where
 pub trait GameRuntimeAnyHandle: Send + Sync {
     fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: Option<Vec<u8>>);
     fn join(&self, cxt: Arc<PlayerContext>, room_id: String);
-    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>);
+    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), std::io::Error>;
 }
 
 impl<R, H, S> GameRuntimeAnyHandle for GameRuntimeHandle<R, H, S>
@@ -119,8 +119,13 @@ where
         self.join(cxt, room_id);
     }
 
-    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) {
-        let action = <H::Action as DeSerialize<S>>::deserialize(action).unwrap();
-        self.action(cxt, room_id, action);
+    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), std::io::Error> {
+        match <H::Action as DeSerialize<S>>::deserialize(action) {
+            Ok(action) => {
+                self.action(cxt, room_id, action);
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
     }
 }

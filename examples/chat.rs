@@ -1,5 +1,6 @@
-use std::sync::Arc;
-
+use serde::Serialize;
+use serde_json::Value;
+use std::{collections::HashMap, io::Error, ops::IndexMut, sync::Arc};
 use thunders::{
     MultiPlayer,
     core::{
@@ -17,7 +18,7 @@ pub async fn main() {
         WebSocketProtocol {
             addr: "127.0.0.1:8080",
         },
-        Json {},
+        Json::default(),
     )
     .register::<SyncGameRuntime, Chat>("chat")
     .run()
@@ -37,25 +38,38 @@ impl GameHooks for Chat {
         Self { messages: vec![] }
     }
 
-    fn diff<'a>(
+    fn diff(
         &self,
-        _connected: &'a [Arc<PlayerContext>],
+        connected: &[Arc<PlayerContext>],
         actions: &[(u64, Self::Action)],
     ) -> Vec<Diff<ChatDiff>> {
-        let mut result = Vec::new();
-
-        for (_, action) in actions {
+        let all_ids: Vec<u64> = connected.iter().map(|p| p.id()).collect();
+        let mut inbox: HashMap<u64, Vec<ChatMessage>> = HashMap::new();
+        for (sender_id, action) in actions {
             match action {
                 ChatAction::IncomingMessage(text) => {
-                    result.push(Diff::Target {
-                        ids: vec![2],
-                        delta: ChatDiff {
-                            messages: vec![text.clone()],
-                        },
-                    });
+                    for &rid in &all_ids {
+                        if rid != *sender_id {
+                            inbox.entry(rid).or_default().push(ChatMessage {
+                                from: *sender_id,
+                                text: text.clone(),
+                            });
+                        }
+                    }
                 }
             }
         }
+
+        let mut result = Vec::with_capacity(inbox.len());
+        for (rid, messages) in inbox {
+            if !messages.is_empty() {
+                result.push(Diff::Target {
+                    ids: vec![rid],
+                    delta: ChatDiff { messages },
+                });
+            }
+        }
+
         result
     }
 
@@ -78,8 +92,13 @@ pub enum ChatAction {
 }
 
 impl DeSerialize<Json> for ChatAction {
-    fn deserialize(_value: Vec<u8>) -> Result<Self, std::io::Error> {
-        Ok(Self::IncomingMessage("test".to_string()))
+    fn deserialize(value: Vec<u8>) -> Result<Self, std::io::Error> {
+        if let Ok(json) = serde_json::from_slice::<Value>(&value) {
+            let text = json.get("text").unwrap().as_str().unwrap().to_string();
+            return Ok(ChatAction::IncomingMessage(text));
+        }
+
+        Err(Error::new(std::io::ErrorKind::InvalidInput, ""))
     }
 
     fn serialize(self) -> Vec<u8> {
@@ -89,8 +108,15 @@ impl DeSerialize<Json> for ChatAction {
 
 // Delta
 
+#[derive(Serialize)]
+pub struct ChatMessage {
+    from: u64,
+    text: String,
+}
+
+#[derive(Serialize)]
 pub struct ChatDiff {
-    messages: Vec<String>,
+    messages: Vec<ChatMessage>,
 }
 
 impl DeSerialize<Json> for ChatDiff {
@@ -99,6 +125,8 @@ impl DeSerialize<Json> for ChatDiff {
     }
 
     fn serialize(self) -> Vec<u8> {
-        self.messages.join(",").into_bytes()
+        serde_json::to_string(&self)
+            .expect("Delta should always be serializable")
+            .into_bytes()
     }
 }

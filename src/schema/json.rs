@@ -7,6 +7,7 @@ use crate::{
     schema::{DeSerialize, Schema, SchemaType},
 };
 
+#[derive(Default)]
 pub struct Json {}
 
 impl Schema for Json {

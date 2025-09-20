@@ -10,7 +10,7 @@ pub trait GameHooks: Send + 'static {
     type Options: Default;
 
     fn build(options: Self::Options) -> Self;
-    fn diff<'a>(
+    fn diff(
         &self,
         connected: &[Arc<PlayerContext>],
         actions: &[(u64, Self::Action)],

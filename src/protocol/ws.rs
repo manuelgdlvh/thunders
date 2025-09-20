@@ -109,9 +109,9 @@ impl NetworkProtocol for WebSocketProtocol {
                                     }
                                 }
                                 InputMessage::Action { type_, id, data } => {
-                                    handlers.get(type_.as_str()).inspect(|handler| {
-                                        handler.action(player_context.id(), id, data)
-                                    });
+                                    if let Some(handler) = handlers.get(type_.as_str()) {
+                                        let _ = handler.action(player_context.id(), id, data);
+                                    }
                                 }
                                 _ => {}
                             }
