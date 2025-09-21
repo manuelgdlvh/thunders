@@ -1,6 +1,6 @@
 // Send actions and update the state. Each tick returns the delta.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::core::context::PlayerContext;
 
@@ -12,9 +12,12 @@ pub trait GameHooks: Send + 'static {
     fn build(options: Self::Options) -> Self;
     fn diff(
         &self,
-        connected: &[Arc<PlayerContext>],
+        player_cxts: &HashMap<u64, Arc<PlayerContext>>,
         actions: &[(u64, Self::Action)],
     ) -> Vec<Diff<Self::Delta>>;
+
+    fn join(&self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>>;
+    fn leave(&self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>>;
     fn update(&mut self, actions: Vec<(u64, Self::Action)>);
     fn is_finished(&self) -> bool;
 }
@@ -30,4 +33,5 @@ where
 {
     Action(H::Action),
     Join(Arc<PlayerContext>),
+    Leave(u64),
 }

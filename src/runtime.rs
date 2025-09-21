@@ -82,6 +82,14 @@ where
         }
     }
 
+    pub fn leave(&self, cxt: u64, room_id: String) {
+        if let Ok(handlers) = self.handlers.read() {
+            handlers.get(room_id.as_str()).inspect(|handler| {
+                handler.event(cxt, Event::Leave(cxt));
+            });
+        }
+    }
+
     pub fn action(&self, cxt: u64, room_id: String, action: H::Action) {
         if let Ok(handlers) = self.handlers.read()
             && let Some(handler) = handlers.get(room_id.as_str())
@@ -94,6 +102,7 @@ where
 pub trait GameRuntimeAnyHandle: Send + Sync {
     fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: Option<Vec<u8>>);
     fn join(&self, cxt: Arc<PlayerContext>, room_id: String);
+    fn leave(&self, cxt: u64, room_id: String);
     fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), std::io::Error>;
 }
 
@@ -117,6 +126,10 @@ where
 
     fn join(&self, cxt: Arc<PlayerContext>, room_id: String) {
         self.join(cxt, room_id);
+    }
+
+    fn leave(&self, cxt: u64, room_id: String) {
+        self.leave(cxt, room_id);
     }
 
     fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), std::io::Error> {

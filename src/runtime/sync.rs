@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     mem,
     sync::{Arc, mpsc},
     thread::{self, JoinHandle},
@@ -41,7 +42,7 @@ where
             // TODO: Add passive streaming actions. This is useful for example if you create a game with a maximum duration of 1 minute, you want prcess a Stop action that is not triggered by a user and is generated after 1 minute elapsed.
             // TODO: Add runtime hooks to handle connection, disconnection, join
             //
-            let mut p_ids: Vec<Arc<PlayerContext>> = vec![];
+            let mut player_cxts: HashMap<u64, Arc<PlayerContext>> = HashMap::default();
             loop {
                 if let Ok(event) = actions_rx.recv() {
                     match event.1 {
@@ -51,8 +52,47 @@ where
                             tick = Duration::from_millis(1000);
                         }
 
+                        Event::Leave(id) => {
+                            let player_context = player_cxts.remove(&id).unwrap();
+                            if let Some(diff) = hooks.leave(player_context.as_ref()) {
+                                match diff {
+                                    Diff::All { delta } => {
+                                        let delta = delta.serialize();
+                                        for p_id in player_cxts.keys() {
+                                            session_manager.send(*p_id, delta.clone());
+                                        }
+                                    }
+                                    Diff::Target { ids, delta } => {
+                                        let delta = delta.serialize();
+                                        for &p_id in ids.iter() {
+                                            session_manager.send(p_id, delta.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+
                         Event::Join(cxt) => {
-                            p_ids.push(cxt);
+                            player_cxts.insert(cxt.id(), Arc::clone(&cxt));
+                            if let Some(diffs) = hooks.join(cxt.as_ref()) {
+                                for diff in diffs {
+                                    match diff {
+                                        Diff::All { delta } => {
+                                            let delta = delta.serialize();
+                                            for p_id in player_cxts.keys() {
+                                                session_manager.send(*p_id, delta.clone());
+                                            }
+                                        }
+                                        Diff::Target { ids, delta } => {
+                                            let delta = delta.serialize();
+                                            for &p_id in ids.iter() {
+                                                session_manager.send(p_id, delta.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             continue;
                         }
                     }
@@ -65,9 +105,46 @@ where
                         Event::Action(action) => {
                             actions_buffer.push((event.0, action));
                         }
+                        Event::Leave(id) => {
+                            let player_context = player_cxts.remove(&id).unwrap();
+                            if let Some(diff) = hooks.leave(player_context.as_ref()) {
+                                match diff {
+                                    Diff::All { delta } => {
+                                        let delta = delta.serialize();
+                                        for p_id in player_cxts.keys() {
+                                            session_manager.send(*p_id, delta.clone());
+                                        }
+                                    }
+                                    Diff::Target { ids, delta } => {
+                                        let delta = delta.serialize();
+                                        for &p_id in ids.iter() {
+                                            session_manager.send(p_id, delta.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         Event::Join(cxt) => {
-                            p_ids.push(cxt);
+                            player_cxts.insert(cxt.id(), Arc::clone(&cxt));
+                            if let Some(diffs) = hooks.join(cxt.as_ref()) {
+                                for diff in diffs {
+                                    match diff {
+                                        Diff::All { delta } => {
+                                            let delta = delta.serialize();
+                                            for p_id in player_cxts.keys() {
+                                                session_manager.send(*p_id, delta.clone());
+                                            }
+                                        }
+                                        Diff::Target { ids, delta } => {
+                                            let delta = delta.serialize();
+                                            for &p_id in ids.iter() {
+                                                session_manager.send(p_id, delta.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -78,12 +155,12 @@ where
                     }
                 }
 
-                for diff in hooks.diff(p_ids.as_slice(), actions_buffer.as_slice()) {
+                for diff in hooks.diff(&player_cxts, actions_buffer.as_slice()) {
                     match diff {
                         Diff::All { delta } => {
                             let delta = delta.serialize();
-                            for p_id in p_ids.iter() {
-                                session_manager.send(p_id.id(), delta.clone());
+                            for p_id in player_cxts.keys() {
+                                session_manager.send(*p_id, delta.clone());
                             }
                         }
                         Diff::Target { ids, delta } => {
@@ -109,6 +186,7 @@ where
         }
     }
 }
+
 pub struct SyncGameHandle<H>
 where
     H: GameHooks,

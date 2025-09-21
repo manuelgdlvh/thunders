@@ -9,7 +9,7 @@ use tokio_tungstenite::{
 
 use crate::{
     core::context::PlayerContext,
-    protocol::{InputMessage, NetworkProtocol, SessionManager},
+    protocol::{self, InputMessage, NetworkProtocol, SessionManager},
     runtime::GameRuntimeAnyHandle,
     schema::{DeSerialize, Schema, SchemaType},
 };
@@ -17,6 +17,8 @@ use crate::{
 pub struct WebSocketProtocol {
     pub addr: &'static str,
 }
+
+// Abstract all shareable behavior of message processing
 
 impl NetworkProtocol for WebSocketProtocol {
     async fn run<S: Schema>(
@@ -26,15 +28,13 @@ impl NetworkProtocol for WebSocketProtocol {
     ) where
         InputMessage: DeSerialize<S>,
     {
-        println!("Starting network protocol...");
-
         let listener = TcpListener::bind(self.addr).await.unwrap();
 
         loop {
             let session_manager = Arc::clone(&session_manager);
             if let Ok((stream, _)) = listener.accept().await {
                 tokio::spawn(async move {
-                    let player_context;
+                    let player_cxt;
                     let ws_stream = accept_async(stream).await.unwrap();
                     let (mut write, mut read) = ws_stream.split();
 
@@ -48,37 +48,32 @@ impl NetworkProtocol for WebSocketProtocol {
                         };
 
                         if let Ok(message) = <InputMessage as DeSerialize<S>>::deserialize(buffer) {
-                            match message {
-                                InputMessage::Connect { id } => {
-                                    player_context = Arc::new(PlayerContext::new(id));
-                                    let mut notification_channel = session_manager.connect(id);
+                            if let Some((cxt, mut receiver)) =
+                                protocol::connect(message, session_manager.as_ref())
+                            {
+                                player_cxt = cxt;
+                                tokio::spawn(async move {
+                                    loop {
+                                        let message_buffer = receiver.recv().await.unwrap();
 
-                                    tokio::spawn(async move {
-                                        loop {
-                                            let message_buffer =
-                                                notification_channel.recv().await.unwrap();
-
-                                            let message = match S::schema_type() {
-                                                SchemaType::Text => {
-                                                    let result =
-                                                        Utf8Bytes::try_from(message_buffer)
-                                                            .unwrap();
-                                                    Message::Text(result)
-                                                }
-
-                                                SchemaType::Binary => {
-                                                    Message::Binary(message_buffer.into())
-                                                }
-                                            };
-                                            if write.send(message).await.is_err() {
-                                                break;
+                                        let message = match S::schema_type() {
+                                            SchemaType::Text => {
+                                                let result =
+                                                    Utf8Bytes::try_from(message_buffer).unwrap();
+                                                Message::Text(result)
                                             }
+
+                                            SchemaType::Binary => {
+                                                Message::Binary(message_buffer.into())
+                                            }
+                                        };
+                                        if write.send(message).await.is_err() {
+                                            break;
                                         }
-                                    });
-                                }
-                                _ => {
-                                    return;
-                                }
+                                    }
+                                });
+                            } else {
+                                return;
                             }
                         } else {
                             return;
@@ -97,26 +92,16 @@ impl NetworkProtocol for WebSocketProtocol {
                         };
 
                         if let Ok(message) = InputMessage::deserialize(buffer) {
-                            match message {
-                                InputMessage::Create { type_, id, options } => {
-                                    if let Some(handler) = handlers.get(type_.as_str()) {
-                                        handler.register(Arc::clone(&player_context), id, options);
-                                    }
-                                }
-                                InputMessage::Join { type_, id } => {
-                                    if let Some(handler) = handlers.get(type_.as_str()) {
-                                        handler.join(Arc::clone(&player_context), id);
-                                    }
-                                }
-                                InputMessage::Action { type_, id, data } => {
-                                    if let Some(handler) = handlers.get(type_.as_str()) {
-                                        let _ = handler.action(player_context.id(), id, data);
-                                    }
-                                }
-                                _ => {}
-                            }
+                            protocol::process_message(
+                                message,
+                                &player_cxt,
+                                session_manager.as_ref(),
+                                handlers,
+                            );
                         }
                     }
+
+                    protocol::disconnect(player_cxt.id(), session_manager.as_ref(), handlers);
                 });
             }
         }

@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
-use std::{collections::HashMap, io::Error, ops::IndexMut, sync::Arc};
+use std::{collections::HashMap, io::Error, sync::Arc};
 use thunders::{
     MultiPlayer,
     core::{
@@ -40,15 +40,14 @@ impl GameHooks for Chat {
 
     fn diff(
         &self,
-        connected: &[Arc<PlayerContext>],
+        player_cxts: &HashMap<u64, Arc<PlayerContext>>,
         actions: &[(u64, Self::Action)],
     ) -> Vec<Diff<ChatDiff>> {
-        let all_ids: Vec<u64> = connected.iter().map(|p| p.id()).collect();
         let mut inbox: HashMap<u64, Vec<ChatMessage>> = HashMap::new();
         for (sender_id, action) in actions {
             match action {
                 ChatAction::IncomingMessage(text) => {
-                    for &rid in &all_ids {
+                    for &rid in player_cxts.keys() {
                         if rid != *sender_id {
                             inbox.entry(rid).or_default().push(ChatMessage {
                                 from: *sender_id,
@@ -79,6 +78,14 @@ impl GameHooks for Chat {
                 ChatAction::IncomingMessage(text) => self.messages.push(text),
             }
         }
+    }
+
+    fn leave(&self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>> {
+        None
+    }
+
+    fn join(&self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>> {
+        None
     }
 
     fn is_finished(&self) -> bool {
