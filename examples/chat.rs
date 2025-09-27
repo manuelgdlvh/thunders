@@ -1,5 +1,9 @@
 use serde_json::Value;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use thunders::{
     MultiPlayer,
     core::{
@@ -27,6 +31,7 @@ pub async fn main() {
 
 pub struct Chat {
     messages: Vec<String>,
+    close_at: Instant,
 }
 
 impl GameHooks for Chat {
@@ -35,7 +40,12 @@ impl GameHooks for Chat {
     type Options = ();
 
     fn build(_options: Self::Options) -> Self {
-        Self { messages: vec![] }
+        Self {
+            messages: vec![],
+            close_at: Instant::now()
+                .checked_add(Duration::from_secs(60))
+                .expect("Add one minute should not overflow"),
+        }
     }
 
     fn diff(
@@ -64,7 +74,7 @@ impl GameHooks for Chat {
             if !messages.is_empty() {
                 result.push(Diff::Target {
                     ids: vec![rid],
-                    delta: ChatDiff { messages },
+                    delta: ChatDiff::MessagesAdded { messages },
                 });
             }
         }
@@ -88,8 +98,17 @@ impl GameHooks for Chat {
         None
     }
 
-    fn is_finished(&self) -> bool {
-        false
+    fn finish(&self) -> (bool, Option<Diff<Self::Delta>>) {
+        if Instant::now() >= self.close_at {
+            (
+                true,
+                Some(Diff::All {
+                    delta: ChatDiff::ChatClosed,
+                }),
+            )
+        } else {
+            (false, None)
+        }
     }
 }
 
@@ -123,8 +142,9 @@ pub struct ChatMessage {
 }
 
 #[derive(serde::Serialize)]
-pub struct ChatDiff {
-    messages: Vec<ChatMessage>,
+pub enum ChatDiff {
+    MessagesAdded { messages: Vec<ChatMessage> },
+    ChatClosed,
 }
 
 impl Serialize<Json> for ChatDiff {

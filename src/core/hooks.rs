@@ -19,7 +19,7 @@ pub trait GameHooks: Send + 'static {
     fn join(&self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>>;
     fn leave(&self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>>;
     fn update(&mut self, actions: Vec<(u64, Self::Action)>);
-    fn is_finished(&self) -> bool;
+    fn finish(&self) -> (bool, Option<Diff<Self::Delta>>);
 }
 
 pub enum Diff<D> {

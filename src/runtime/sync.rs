@@ -61,6 +61,27 @@ where
 
             let mut player_cxts: HashMap<u64, Arc<PlayerContext>> = HashMap::default();
             loop {
+                let (is_finished, diff_opt) = hooks.finish();
+
+                if is_finished {
+                    if let Some(diff) = diff_opt {
+                        match diff {
+                            Diff::All { delta } => {
+                                let delta = delta.serialize();
+                                for p_id in player_cxts.keys() {
+                                    session_manager.send(*p_id, delta.clone());
+                                }
+                            }
+                            Diff::Target { ids, delta } => {
+                                let delta = delta.serialize();
+                                for &p_id in ids.iter() {
+                                    session_manager.send(p_id, delta.clone());
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
                 if let Ok(event) = actions_rx.recv_timeout(self.action_timeout) {
                     match event.1 {
                         Event::Action(action) => {
@@ -192,10 +213,6 @@ where
                 }
 
                 hooks.update(mem::take(&mut actions_buffer));
-
-                if hooks.is_finished() {
-                    break;
-                }
             }
         });
 
