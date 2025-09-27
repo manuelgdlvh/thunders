@@ -1,4 +1,4 @@
-use std::io::Error;
+use crate::protocol::ThundersError;
 
 pub mod json;
 
@@ -11,12 +11,18 @@ pub enum SchemaType {
     Binary,
 }
 
-pub trait DeSerialize<S>
+pub trait Deserialize<S>
 where
     S: Schema,
     Self: Sized,
 {
-    fn deserialize(value: Vec<u8>) -> Result<Self, Error>;
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError>;
+}
 
+pub trait Serialize<S>
+where
+    S: Schema,
+    Self: Sized,
+{
     fn serialize(self) -> Vec<u8>;
 }

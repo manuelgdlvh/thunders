@@ -13,7 +13,7 @@ use crate::{
     },
     protocol::SessionManager,
     runtime::{GameHandle, GameRuntime},
-    schema::{DeSerialize, Schema},
+    schema::{Deserialize, Schema, Serialize},
 };
 
 pub struct SyncGameRuntime {}
@@ -22,9 +22,9 @@ impl<H, S> GameRuntime<H, S> for SyncGameRuntime
 where
     H: GameHooks,
     S: Schema,
-    H::Delta: DeSerialize<S>,
-    H::Options: DeSerialize<S>,
-    H::Action: DeSerialize<S>,
+    H::Delta: Serialize<S>,
+    H::Options: Deserialize<S>,
+    H::Action: Deserialize<S>,
 {
     type Handle = SyncGameHandle<H>;
 
@@ -53,19 +53,20 @@ where
                         }
 
                         Event::Leave(id) => {
-                            let player_context = player_cxts.remove(&id).unwrap();
-                            if let Some(diff) = hooks.leave(player_context.as_ref()) {
-                                match diff {
-                                    Diff::All { delta } => {
-                                        let delta = delta.serialize();
-                                        for p_id in player_cxts.keys() {
-                                            session_manager.send(*p_id, delta.clone());
+                            if let Some(player_context) = player_cxts.remove(&id) {
+                                if let Some(diff) = hooks.leave(player_context.as_ref()) {
+                                    match diff {
+                                        Diff::All { delta } => {
+                                            let delta = delta.serialize();
+                                            for p_id in player_cxts.keys() {
+                                                session_manager.send(*p_id, delta.clone());
+                                            }
                                         }
-                                    }
-                                    Diff::Target { ids, delta } => {
-                                        let delta = delta.serialize();
-                                        for &p_id in ids.iter() {
-                                            session_manager.send(p_id, delta.clone());
+                                        Diff::Target { ids, delta } => {
+                                            let delta = delta.serialize();
+                                            for &p_id in ids.iter() {
+                                                session_manager.send(p_id, delta.clone());
+                                            }
                                         }
                                     }
                                 }
@@ -106,19 +107,20 @@ where
                             actions_buffer.push((event.0, action));
                         }
                         Event::Leave(id) => {
-                            let player_context = player_cxts.remove(&id).unwrap();
-                            if let Some(diff) = hooks.leave(player_context.as_ref()) {
-                                match diff {
-                                    Diff::All { delta } => {
-                                        let delta = delta.serialize();
-                                        for p_id in player_cxts.keys() {
-                                            session_manager.send(*p_id, delta.clone());
+                            if let Some(player_context) = player_cxts.remove(&id) {
+                                if let Some(diff) = hooks.leave(player_context.as_ref()) {
+                                    match diff {
+                                        Diff::All { delta } => {
+                                            let delta = delta.serialize();
+                                            for p_id in player_cxts.keys() {
+                                                session_manager.send(*p_id, delta.clone());
+                                            }
                                         }
-                                    }
-                                    Diff::Target { ids, delta } => {
-                                        let delta = delta.serialize();
-                                        for &p_id in ids.iter() {
-                                            session_manager.send(p_id, delta.clone());
+                                        Diff::Target { ids, delta } => {
+                                            let delta = delta.serialize();
+                                            for &p_id in ids.iter() {
+                                                session_manager.send(p_id, delta.clone());
+                                            }
                                         }
                                     }
                                 }

@@ -1,22 +1,23 @@
-use serde::Serialize;
 use serde_json::Value;
-use std::{collections::HashMap, io::Error, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 use thunders::{
     MultiPlayer,
     core::{
         context::PlayerContext,
         hooks::{Diff, GameHooks},
     },
-    protocol::ws::WebSocketProtocol,
+    protocol::{ThundersError, ws::WebSocketProtocol},
     runtime::sync::SyncGameRuntime,
-    schema::{DeSerialize, json::Json},
+    schema::{Deserialize, Serialize, json::Json},
 };
 
 #[tokio::main]
 pub async fn main() {
     MultiPlayer::new(
         WebSocketProtocol {
-            addr: "127.0.0.1:8080",
+            addr: "127.0.0.1".to_string(),
+            port: 8080,
+            endpoint: "".to_string(),
         },
         Json::default(),
     )
@@ -98,42 +99,39 @@ pub enum ChatAction {
     IncomingMessage(String),
 }
 
-impl DeSerialize<Json> for ChatAction {
-    fn deserialize(value: Vec<u8>) -> Result<Self, std::io::Error> {
+impl Deserialize<Json> for ChatAction {
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
+        const TEXT: &str = "text";
+
         if let Ok(json) = serde_json::from_slice::<Value>(&value) {
-            let text = json.get("text").unwrap().as_str().unwrap().to_string();
-            return Ok(ChatAction::IncomingMessage(text));
+            let text = json
+                .get(TEXT)
+                .ok_or(ThundersError::DeserializationFailure)?
+                .as_str()
+                .ok_or(ThundersError::DeserializationFailure)?
+                .to_string();
+            Ok(ChatAction::IncomingMessage(text))
+        } else {
+            Err(ThundersError::InvalidInput)
         }
-
-        Err(Error::new(std::io::ErrorKind::InvalidInput, ""))
-    }
-
-    fn serialize(self) -> Vec<u8> {
-        unreachable!()
     }
 }
 
-// Delta
-
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 pub struct ChatMessage {
     from: u64,
     text: String,
 }
 
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 pub struct ChatDiff {
     messages: Vec<ChatMessage>,
 }
 
-impl DeSerialize<Json> for ChatDiff {
-    fn deserialize(_value: Vec<u8>) -> Result<Self, std::io::Error> {
-        unreachable!()
-    }
-
+impl Serialize<Json> for ChatDiff {
     fn serialize(self) -> Vec<u8> {
         serde_json::to_string(&self)
-            .expect("Delta should always be serializable")
+            .expect("Should always be serializable")
             .into_bytes()
     }
 }

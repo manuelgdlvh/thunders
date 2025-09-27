@@ -1,10 +1,8 @@
-use std::io::Error;
-
 use serde_json::Value;
 
 use crate::{
-    protocol::InputMessage,
-    schema::{DeSerialize, Schema, SchemaType},
+    protocol::{InputMessage, ThundersError},
+    schema::{Deserialize, Schema, SchemaType, Serialize},
 };
 
 #[derive(Default)]
@@ -16,49 +14,48 @@ impl Schema for Json {
     }
 }
 
-impl DeSerialize<Json> for () {
-    fn deserialize(_value: Vec<u8>) -> Result<Self, Error> {
+impl Deserialize<Json> for () {
+    fn deserialize(_value: Vec<u8>) -> Result<Self, ThundersError> {
         Ok(())
     }
-
+}
+impl Serialize<Json> for () {
     fn serialize(self) -> Vec<u8> {
         vec![]
     }
 }
 
-impl DeSerialize<Json> for InputMessage {
-    fn deserialize(value: Vec<u8>) -> Result<Self, Error> {
-        let json: Value = serde_json::from_slice(value.as_slice())
-            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+impl Deserialize<Json> for InputMessage {
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
+        const METHOD: &str = "method";
+        const CONNECT: &str = "connect";
+        const ID: &str = "id";
+        const CREATE: &str = "create";
+        const TYPE: &str = "type";
+        const OPTIONS: &str = "options";
+        const DATA: &str = "data";
+        const ACTION: &str = "action";
+        const JOIN: &str = "join";
 
-        let method = json
-            .get("method")
-            .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
+        let json: Value =
+            serde_json::from_slice(value.as_slice()).map_err(|_| ThundersError::InvalidInput)?;
 
-        match method
-            .as_str()
-            .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?
-        {
-            "connect" => {
-                let id = json
-                    .get("id")
-                    .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
+        let method = json.get(METHOD).ok_or(ThundersError::InvalidInput)?;
+        match method.as_str().ok_or(ThundersError::InvalidInput)? {
+            CONNECT => {
+                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
                 Ok(InputMessage::Connect {
-                    id: id
-                        .as_u64()
-                        .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?,
+                    id: id.as_u64().ok_or(ThundersError::DeserializationFailure)?,
                 })
             }
-            "create" => {
+            CREATE => {
                 let type_ = json
-                    .get("type")
-                    .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
+                    .get(TYPE)
+                    .ok_or(ThundersError::DeserializationFailure)?;
 
-                let id = json
-                    .get("id")
-                    .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
+                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
 
-                let options: Option<Vec<u8>> = json.get("options").and_then(|node| {
+                let options: Option<Vec<u8>> = json.get(OPTIONS).and_then(|node| {
                     serde_json::to_string(node)
                         .map(|json| json.into_bytes())
                         .ok()
@@ -67,71 +64,111 @@ impl DeSerialize<Json> for InputMessage {
                 Ok(InputMessage::Create {
                     type_: type_
                         .as_str()
-                        .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                     id: id
                         .as_str()
-                        .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                     options,
                 })
             }
 
-            "join" => {
+            JOIN => {
                 let type_ = json
-                    .get("type")
-                    .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
+                    .get(TYPE)
+                    .ok_or(ThundersError::DeserializationFailure)?;
 
-                let id = json
-                    .get("id")
-                    .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
-
+                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
                 Ok(InputMessage::Join {
                     type_: type_
                         .as_str()
-                        .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                     id: id
                         .as_str()
-                        .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                 })
             }
-            "action" => {
+            ACTION => {
                 let type_ = json
-                    .get("type")
-                    .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
-
-                let id = json
-                    .get("id")
-                    .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
-
+                    .get(TYPE)
+                    .ok_or(ThundersError::DeserializationFailure)?;
+                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
                 let data: Vec<u8> = json
-                    .get("data")
+                    .get(DATA)
                     .and_then(|node| {
                         serde_json::to_string(node)
                             .map(|json| json.into_bytes())
                             .ok()
                     })
-                    .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?;
+                    .ok_or(ThundersError::DeserializationFailure)?;
 
                 Ok(InputMessage::Action {
                     type_: type_
                         .as_str()
-                        .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                     id: id
                         .as_str()
-                        .ok_or(Error::new(std::io::ErrorKind::InvalidInput, ""))?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                     data,
                 })
             }
-            &_ => Err(Error::new(std::io::ErrorKind::InvalidInput, "")),
+            &_ => Err(ThundersError::InvalidInput),
         }
     }
+}
 
+impl Serialize<Json> for ThundersError {
     fn serialize(self) -> Vec<u8> {
-        vec![]
+        match self {
+            Self::StartFailure => {
+                vec![]
+            }
+            Self::MessageNotConnected => serde_json::from_str::<Value>(
+                r#"
+        {
+            "type": "NOT_CONNECTED",
+            "description": "Received message without player be connected"
+        }"#,
+            )
+            .expect("Should serialize successfully")
+            .to_string()
+            .into_bytes(),
+
+            Self::ConnectionFailure => serde_json::from_str::<Value>(
+                r#"
+        {
+            "type": "CONNECTION_FAILURE",
+            "description": ""
+        }"#,
+            )
+            .expect("Should serialize successfully")
+            .to_string()
+            .into_bytes(),
+            Self::InvalidInput => serde_json::from_str::<Value>(
+                r#"
+        {
+            "type": "INVALID_INPUT",
+            "description": ""
+        }"#,
+            )
+            .expect("Should serialize successfully")
+            .to_string()
+            .into_bytes(),
+            Self::DeserializationFailure => serde_json::from_str::<Value>(
+                r#"
+        {
+            "type": "INVALID_INPUT",
+            "description": ""
+        }"#,
+            )
+            .expect("Should serialize successfully")
+            .to_string()
+            .into_bytes(),
+        }
     }
 }

@@ -72,7 +72,7 @@ use crate::{
     core::hooks::GameHooks,
     protocol::{InputMessage, NetworkProtocol, SessionManager},
     runtime::{GameRuntime, GameRuntimeAnyHandle, GameRuntimeHandle},
-    schema::{DeSerialize, Schema},
+    schema::{Deserialize, Schema, Serialize},
 };
 
 pub mod core;
@@ -110,9 +110,9 @@ where
         type_: &'static str,
     ) -> Self
     where
-        H::Delta: DeSerialize<S>,
-        H::Options: DeSerialize<S>,
-        H::Action: DeSerialize<S>,
+        H::Delta: Serialize<S>,
+        H::Options: Deserialize<S>,
+        H::Action: Deserialize<S>,
     {
         self.handlers.insert(
             type_,
@@ -125,7 +125,7 @@ where
 
     pub async fn run(self)
     where
-        InputMessage: DeSerialize<S>,
+        InputMessage: Deserialize<S>,
     {
         let handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>> =
             Box::leak(Box::new(self.handlers));

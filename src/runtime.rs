@@ -8,8 +8,8 @@ use crate::{
         context::PlayerContext,
         hooks::{Event, GameHooks},
     },
-    protocol::SessionManager,
-    schema::{DeSerialize, Schema},
+    protocol::{SessionManager, ThundersError},
+    schema::{Deserialize, Schema, Serialize},
 };
 
 pub mod sync;
@@ -18,9 +18,9 @@ pub trait GameRuntime<H, S>
 where
     S: Schema,
     H: GameHooks,
-    H::Delta: DeSerialize<S>,
-    H::Options: DeSerialize<S>,
-    H::Action: DeSerialize<S>,
+    H::Delta: Serialize<S>,
+    H::Options: Deserialize<S>,
+    H::Action: Deserialize<S>,
 {
     type Handle: GameHandle<H>;
 
@@ -42,9 +42,9 @@ where
     R: GameRuntime<H, S>,
     H: GameHooks,
     S: Schema,
-    H::Delta: DeSerialize<S>,
-    H::Options: DeSerialize<S>,
-    H::Action: DeSerialize<S>,
+    H::Delta: Serialize<S>,
+    H::Options: Deserialize<S>,
+    H::Action: Deserialize<S>,
 {
     handlers: RwLock<HashMap<String, R::Handle>>,
     session_manager: Arc<SessionManager>,
@@ -55,9 +55,9 @@ where
     R: GameRuntime<H, S>,
     H: GameHooks,
     S: Schema,
-    H::Delta: DeSerialize<S>,
-    H::Options: DeSerialize<S>,
-    H::Action: DeSerialize<S>,
+    H::Delta: Serialize<S>,
+    H::Options: Deserialize<S>,
+    H::Action: Deserialize<S>,
 {
     pub fn new(session_manager: Arc<SessionManager>) -> Self {
         Self {
@@ -103,7 +103,7 @@ pub trait GameRuntimeAnyHandle: Send + Sync {
     fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: Option<Vec<u8>>);
     fn join(&self, cxt: Arc<PlayerContext>, room_id: String);
     fn leave(&self, cxt: u64, room_id: String);
-    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), std::io::Error>;
+    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), ThundersError>;
 }
 
 impl<R, H, S> GameRuntimeAnyHandle for GameRuntimeHandle<R, H, S>
@@ -111,14 +111,20 @@ where
     R: GameRuntime<H, S>,
     H: GameHooks,
     S: Schema,
-    H::Delta: DeSerialize<S>,
-    H::Options: DeSerialize<S>,
-    H::Action: DeSerialize<S>,
+    H::Delta: Serialize<S>,
+    H::Options: Deserialize<S>,
+    H::Action: Deserialize<S>,
 {
     fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: Option<Vec<u8>>) {
         if let Some(options) = options {
-            let result = <H::Options as DeSerialize<S>>::deserialize(options).unwrap();
-            self.register(cxt, room_id, result);
+            match <H::Options as Deserialize<S>>::deserialize(options) {
+                Ok(options) => {
+                    self.register(cxt, room_id, options);
+                }
+                Err(err) => {
+                    self.session_manager.send(cxt.id(), err.serialize());
+                }
+            }
         } else {
             self.register(cxt, room_id, H::Options::default());
         }
@@ -132,8 +138,8 @@ where
         self.leave(cxt, room_id);
     }
 
-    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), std::io::Error> {
-        match <H::Action as DeSerialize<S>>::deserialize(action) {
+    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), ThundersError> {
+        match <H::Action as Deserialize<S>>::deserialize(action) {
             Ok(action) => {
                 self.action(cxt, room_id, action);
                 Ok(())
