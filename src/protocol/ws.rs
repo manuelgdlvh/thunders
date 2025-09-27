@@ -14,9 +14,17 @@ use crate::{
 };
 
 pub struct WebSocketProtocol {
-    pub addr: String,
-    pub port: u16,
-    pub endpoint: String,
+    addr: String,
+    port: u16,
+}
+
+impl WebSocketProtocol {
+    pub fn new(addr: impl Into<String>, port: u16) -> Self {
+        Self {
+            addr: addr.into(),
+            port,
+        }
+    }
 }
 
 // Abstract all shareable behavior of message processing
@@ -30,10 +38,9 @@ impl NetworkProtocol for WebSocketProtocol {
     where
         InputMessage: Deserialize<S>,
     {
-        let listener =
-            TcpListener::bind(format!("{}:{}{}", self.addr, self.port, self.endpoint).as_str())
-                .await
-                .map_err(|_| ThundersError::StartFailure)?;
+        let listener = TcpListener::bind(format!("{}:{}", self.addr, self.port).as_str())
+            .await
+            .map_err(|_| ThundersError::StartFailure)?;
 
         loop {
             let session_manager = Arc::clone(&session_manager);

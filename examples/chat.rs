@@ -7,23 +7,22 @@ use thunders::{
         hooks::{Diff, GameHooks},
     },
     protocol::{ThundersError, ws::WebSocketProtocol},
-    runtime::sync::SyncGameRuntime,
+    runtime::sync::{Settings, SyncRuntime},
     schema::{Deserialize, Serialize, json::Json},
 };
 
 #[tokio::main]
 pub async fn main() {
-    MultiPlayer::new(
-        WebSocketProtocol {
-            addr: "127.0.0.1".to_string(),
-            port: 8080,
-            endpoint: "".to_string(),
-        },
-        Json::default(),
-    )
-    .register::<SyncGameRuntime, Chat>("chat")
-    .run()
-    .await;
+    MultiPlayer::new(WebSocketProtocol::new("127.0.0.1", 8080), Json::default())
+        .register::<SyncRuntime, Chat>(
+            "lobby_chat",
+            Settings {
+                max_action_await_millis: 2000,
+                tick_interval_millis: 100,
+            },
+        )
+        .run()
+        .await;
 }
 
 pub struct Chat {

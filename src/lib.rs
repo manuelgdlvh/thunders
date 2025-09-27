@@ -108,6 +108,7 @@ where
     pub fn register<R: GameRuntime<H, S> + 'static, H: GameHooks>(
         mut self,
         type_: &'static str,
+        settings: R::Settings,
     ) -> Self
     where
         H::Delta: Serialize<S>,
@@ -116,9 +117,10 @@ where
     {
         self.handlers.insert(
             type_,
-            Box::new(GameRuntimeHandle::<R, H, S>::new(Arc::clone(
-                &self.session_manager,
-            ))),
+            Box::new(GameRuntimeHandle::<R, H, S>::new(
+                settings,
+                Arc::clone(&self.session_manager),
+            )),
         );
         self
     }

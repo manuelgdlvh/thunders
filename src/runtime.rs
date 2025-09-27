@@ -23,8 +23,11 @@ where
     H::Action: Deserialize<S>,
 {
     type Handle: GameHandle<H>;
+    type Settings: Send + Sync;
 
-    fn start(options: H::Options, session_manager: Arc<SessionManager>) -> Self::Handle;
+    fn build(settings: &Self::Settings) -> Self;
+
+    fn start(self, options: H::Options, session_manager: Arc<SessionManager>) -> Self::Handle;
 }
 
 // Add join and left player hooks
@@ -46,6 +49,7 @@ where
     H::Options: Deserialize<S>,
     H::Action: Deserialize<S>,
 {
+    settings: R::Settings,
     handlers: RwLock<HashMap<String, R::Handle>>,
     session_manager: Arc<SessionManager>,
 }
@@ -59,15 +63,17 @@ where
     H::Options: Deserialize<S>,
     H::Action: Deserialize<S>,
 {
-    pub fn new(session_manager: Arc<SessionManager>) -> Self {
+    pub fn new(settings: R::Settings, session_manager: Arc<SessionManager>) -> Self {
         Self {
+            settings,
             handlers: RwLock::new(HashMap::new()),
             session_manager,
         }
     }
 
     pub fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: H::Options) {
-        let r_handle = R::start(options, Arc::clone(&self.session_manager));
+        let runtime = R::build(&self.settings);
+        let r_handle = runtime.start(options, Arc::clone(&self.session_manager));
         r_handle.event(cxt.id(), Event::Join(cxt));
         if let Ok(mut handlers) = self.handlers.write() {
             handlers.insert(room_id, r_handle);

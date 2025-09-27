@@ -16,9 +16,17 @@ use crate::{
     schema::{Deserialize, Schema, Serialize},
 };
 
-pub struct SyncGameRuntime {}
+pub struct SyncRuntime {
+    action_timeout: Duration,
+    tick: Duration,
+}
 
-impl<H, S> GameRuntime<H, S> for SyncGameRuntime
+pub struct Settings {
+    pub max_action_await_millis: u64,
+    pub tick_interval_millis: u64,
+}
+
+impl<H, S> GameRuntime<H, S> for SyncRuntime
 where
     H: GameHooks,
     S: Schema,
@@ -27,8 +35,17 @@ where
     H::Action: Deserialize<S>,
 {
     type Handle = SyncGameHandle<H>;
+    type Settings = Settings;
+
+    fn build(settings: &Self::Settings) -> Self {
+        Self {
+            action_timeout: Duration::from_millis(settings.max_action_await_millis),
+            tick: Duration::from_millis(settings.tick_interval_millis),
+        }
+    }
 
     fn start(
+        self,
         options: <H as GameHooks>::Options,
         session_manager: Arc<SessionManager>,
     ) -> Self::Handle {
@@ -41,15 +58,15 @@ where
 
             // TODO: Add passive streaming actions. This is useful for example if you create a game with a maximum duration of 1 minute, you want prcess a Stop action that is not triggered by a user and is generated after 1 minute elapsed.
             // TODO: Add runtime hooks to handle connection, disconnection, join
-            //
+
             let mut player_cxts: HashMap<u64, Arc<PlayerContext>> = HashMap::default();
             loop {
-                if let Ok(event) = actions_rx.recv() {
+                if let Ok(event) = actions_rx.recv_timeout(self.action_timeout) {
                     match event.1 {
                         Event::Action(action) => {
                             actions_buffer.push((event.0, action));
                             now = Instant::now();
-                            tick = Duration::from_millis(1000);
+                            tick = self.tick;
                         }
 
                         Event::Leave(id) => {
@@ -98,7 +115,7 @@ where
                         }
                     }
                 } else {
-                    break;
+                    continue;
                 }
 
                 while let Ok(event) = actions_rx.recv_timeout(tick) {
