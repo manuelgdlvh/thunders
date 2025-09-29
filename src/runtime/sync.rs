@@ -9,7 +9,7 @@ use std::{
 use crate::{
     core::{
         context::PlayerContext,
-        hooks::{Diff, Event, GameHooks},
+        hooks::{Diff, DiffNotification, Event, GameHooks},
     },
     protocol::SessionManager,
     runtime::{GameHandle, GameRuntime},
@@ -17,6 +17,8 @@ use crate::{
 };
 
 pub struct SyncRuntime {
+    type_: &'static str,
+    id: String,
     action_timeout: Duration,
     tick: Duration,
 }
@@ -33,12 +35,15 @@ where
     H::Delta: Serialize<S>,
     H::Options: Deserialize<S>,
     H::Action: Deserialize<S>,
+    for<'a> DiffNotification<'a>: Serialize<S>,
 {
     type Handle = SyncGameHandle<H>;
     type Settings = Settings;
 
-    fn build(settings: &Self::Settings) -> Self {
+    fn build(type_: &'static str, id: String, settings: &Self::Settings) -> Self {
         Self {
+            id,
+            type_,
             action_timeout: Duration::from_millis(settings.max_action_await_millis),
             tick: Duration::from_millis(settings.tick_interval_millis),
         }
@@ -56,9 +61,6 @@ where
             let mut now;
             let mut tick;
 
-            // TODO: Add passive streaming actions. This is useful for example if you create a game with a maximum duration of 1 minute, you want prcess a Stop action that is not triggered by a user and is generated after 1 minute elapsed.
-            // TODO: Add runtime hooks to handle connection, disconnection, join
-
             let mut player_cxts: HashMap<u64, Arc<PlayerContext>> = HashMap::default();
             loop {
                 let (is_finished, diff_opt) = hooks.finish();
@@ -67,13 +69,23 @@ where
                     if let Some(diff) = diff_opt {
                         match diff {
                             Diff::All { delta } => {
-                                let delta = delta.serialize();
+                                let delta = DiffNotification::new(
+                                    self.type_,
+                                    self.id.as_str(),
+                                    delta.serialize(),
+                                )
+                                .serialize();
                                 for p_id in player_cxts.keys() {
                                     session_manager.send(*p_id, delta.clone());
                                 }
                             }
                             Diff::Target { ids, delta } => {
-                                let delta = delta.serialize();
+                                let delta = DiffNotification::new(
+                                    self.type_,
+                                    self.id.as_str(),
+                                    delta.serialize(),
+                                )
+                                .serialize();
                                 for &p_id in ids.iter() {
                                     session_manager.send(p_id, delta.clone());
                                 }
@@ -95,13 +107,25 @@ where
                                 if let Some(diff) = hooks.leave(player_context.as_ref()) {
                                     match diff {
                                         Diff::All { delta } => {
-                                            let delta = delta.serialize();
+                                            let delta = DiffNotification::new(
+                                                self.type_,
+                                                self.id.as_str(),
+                                                delta.serialize(),
+                                            )
+                                            .serialize();
+
                                             for p_id in player_cxts.keys() {
                                                 session_manager.send(*p_id, delta.clone());
                                             }
                                         }
                                         Diff::Target { ids, delta } => {
-                                            let delta = delta.serialize();
+                                            let delta = DiffNotification::new(
+                                                self.type_,
+                                                self.id.as_str(),
+                                                delta.serialize(),
+                                            )
+                                            .serialize();
+
                                             for &p_id in ids.iter() {
                                                 session_manager.send(p_id, delta.clone());
                                             }
@@ -118,13 +142,25 @@ where
                                 for diff in diffs {
                                     match diff {
                                         Diff::All { delta } => {
-                                            let delta = delta.serialize();
+                                            let delta = DiffNotification::new(
+                                                self.type_,
+                                                self.id.as_str(),
+                                                delta.serialize(),
+                                            )
+                                            .serialize();
+
                                             for p_id in player_cxts.keys() {
                                                 session_manager.send(*p_id, delta.clone());
                                             }
                                         }
                                         Diff::Target { ids, delta } => {
-                                            let delta = delta.serialize();
+                                            let delta = DiffNotification::new(
+                                                self.type_,
+                                                self.id.as_str(),
+                                                delta.serialize(),
+                                            )
+                                            .serialize();
+
                                             for &p_id in ids.iter() {
                                                 session_manager.send(p_id, delta.clone());
                                             }
@@ -149,13 +185,25 @@ where
                                 if let Some(diff) = hooks.leave(player_context.as_ref()) {
                                     match diff {
                                         Diff::All { delta } => {
-                                            let delta = delta.serialize();
+                                            let delta = DiffNotification::new(
+                                                self.type_,
+                                                self.id.as_str(),
+                                                delta.serialize(),
+                                            )
+                                            .serialize();
+
                                             for p_id in player_cxts.keys() {
                                                 session_manager.send(*p_id, delta.clone());
                                             }
                                         }
                                         Diff::Target { ids, delta } => {
-                                            let delta = delta.serialize();
+                                            let delta = DiffNotification::new(
+                                                self.type_,
+                                                self.id.as_str(),
+                                                delta.serialize(),
+                                            )
+                                            .serialize();
+
                                             for &p_id in ids.iter() {
                                                 session_manager.send(p_id, delta.clone());
                                             }
@@ -171,13 +219,25 @@ where
                                 for diff in diffs {
                                     match diff {
                                         Diff::All { delta } => {
-                                            let delta = delta.serialize();
+                                            let delta = DiffNotification::new(
+                                                self.type_,
+                                                self.id.as_str(),
+                                                delta.serialize(),
+                                            )
+                                            .serialize();
+
                                             for p_id in player_cxts.keys() {
                                                 session_manager.send(*p_id, delta.clone());
                                             }
                                         }
                                         Diff::Target { ids, delta } => {
-                                            let delta = delta.serialize();
+                                            let delta = DiffNotification::new(
+                                                self.type_,
+                                                self.id.as_str(),
+                                                delta.serialize(),
+                                            )
+                                            .serialize();
+
                                             for &p_id in ids.iter() {
                                                 session_manager.send(p_id, delta.clone());
                                             }
@@ -198,13 +258,25 @@ where
                 for diff in hooks.diff(&player_cxts, actions_buffer.as_slice()) {
                     match diff {
                         Diff::All { delta } => {
-                            let delta = delta.serialize();
+                            let delta = DiffNotification::new(
+                                self.type_,
+                                self.id.as_str(),
+                                delta.serialize(),
+                            )
+                            .serialize();
+
                             for p_id in player_cxts.keys() {
                                 session_manager.send(*p_id, delta.clone());
                             }
                         }
                         Diff::Target { ids, delta } => {
-                            let delta = delta.serialize();
+                            let delta = DiffNotification::new(
+                                self.type_,
+                                self.id.as_str(),
+                                delta.serialize(),
+                            )
+                            .serialize();
+
                             for &p_id in ids.iter() {
                                 session_manager.send(p_id, delta.clone());
                             }

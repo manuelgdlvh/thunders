@@ -35,3 +35,15 @@ where
     Join(Arc<PlayerContext>),
     Leave(u64),
 }
+
+pub struct DiffNotification<'a> {
+    pub type_: &'static str,
+    pub id: &'a str,
+    pub data: Vec<u8>,
+}
+
+impl<'a> DiffNotification<'a> {
+    pub fn new(type_: &'static str, id: &'a str, data: Vec<u8>) -> Self {
+        Self { type_, id, data }
+    }
+}

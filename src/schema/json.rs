@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 use crate::{
+    core::hooks::DiffNotification,
     protocol::{InputMessage, ThundersError},
     schema::{Deserialize, Schema, SchemaType, Serialize},
 };
@@ -170,5 +171,24 @@ impl Serialize<Json> for ThundersError {
             .to_string()
             .into_bytes(),
         }
+    }
+}
+
+impl Serialize<Json> for DiffNotification<'_> {
+    fn serialize(mut self) -> Vec<u8> {
+        let json = format!(
+            r#"
+            {{
+            "type" : "{}",
+            "id": "{}",
+            "data":                
+            "#,
+            self.type_, self.id
+        );
+
+        let mut raw_message = json.into_bytes();
+        raw_message.append(&mut self.data);
+        raw_message.push(b'}');
+        raw_message
     }
 }

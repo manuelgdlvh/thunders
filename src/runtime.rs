@@ -25,7 +25,7 @@ where
     type Handle: GameHandle<H>;
     type Settings: Send + Sync;
 
-    fn build(settings: &Self::Settings) -> Self;
+    fn build(type_: &'static str, id: String, settings: &Self::Settings) -> Self;
 
     fn start(self, options: H::Options, session_manager: Arc<SessionManager>) -> Self::Handle;
 }
@@ -49,6 +49,7 @@ where
     H::Options: Deserialize<S>,
     H::Action: Deserialize<S>,
 {
+    type_: &'static str,
     settings: R::Settings,
     handlers: RwLock<HashMap<String, R::Handle>>,
     session_manager: Arc<SessionManager>,
@@ -63,8 +64,13 @@ where
     H::Options: Deserialize<S>,
     H::Action: Deserialize<S>,
 {
-    pub fn new(settings: R::Settings, session_manager: Arc<SessionManager>) -> Self {
+    pub fn new(
+        type_: &'static str,
+        settings: R::Settings,
+        session_manager: Arc<SessionManager>,
+    ) -> Self {
         Self {
+            type_,
             settings,
             handlers: RwLock::new(HashMap::new()),
             session_manager,
@@ -72,7 +78,7 @@ where
     }
 
     pub fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: H::Options) {
-        let runtime = R::build(&self.settings);
+        let runtime = R::build(self.type_, room_id.clone(), &self.settings);
         let r_handle = runtime.start(options, Arc::clone(&self.session_manager));
         r_handle.event(cxt.id(), Event::Join(cxt));
         if let Ok(mut handlers) = self.handlers.write() {
