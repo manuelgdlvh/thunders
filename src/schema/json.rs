@@ -126,6 +126,38 @@ impl Deserialize<Json> for InputMessage {
 impl Serialize<Json> for ThundersError {
     fn serialize(self) -> Vec<u8> {
         match self {
+            Self::RoomTypeNotFound => serde_json::from_str::<Value>(
+                r#"
+        {
+            "type": "ROOM_TYPE_NOT_FOUND",
+            "description": "The room type does not exists"
+        }"#,
+            )
+            .expect("Should serialize successfully")
+            .to_string()
+            .into_bytes(),
+
+            Self::RoomNotFound => serde_json::from_str::<Value>(
+                r#"
+        {
+            "type": "ROOM_NOT_FOUND",
+            "description": "The room does not exists"
+        }"#,
+            )
+            .expect("Should serialize successfully")
+            .to_string()
+            .into_bytes(),
+            Self::RoomAlreadyCreated => serde_json::from_str::<Value>(
+                r#"
+        {
+            "type": "ROOM_ALREADY_CREATED",
+            "description": "The room already exists"
+        }"#,
+            )
+            .expect("Should serialize successfully")
+            .to_string()
+            .into_bytes(),
+
             Self::StartFailure => {
                 vec![]
             }
@@ -176,19 +208,37 @@ impl Serialize<Json> for ThundersError {
 
 impl Serialize<Json> for DiffNotification<'_> {
     fn serialize(mut self) -> Vec<u8> {
-        let json = format!(
-            r#"
+        let json;
+
+        if self.finished {
+            json = format!(
+                r#"
             {{
             "type" : "{}",
             "id": "{}",
-            "data":                
+            "finished": true,
+            "data": {{}}}}                
             "#,
-            self.type_, self.id
-        );
+                self.type_, self.id
+            );
+        } else {
+            json = format!(
+                r#"
+            {{
+            "type" : "{}",
+            "id": "{}",
+            "data":               
+            "#,
+                self.type_, self.id
+            );
+        }
 
         let mut raw_message = json.into_bytes();
-        raw_message.append(&mut self.data);
-        raw_message.push(b'}');
+
+        if !self.finished {
+            raw_message.append(&mut self.data);
+            raw_message.push(b'}');
+        }
         raw_message
     }
 }

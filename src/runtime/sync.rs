@@ -92,6 +92,12 @@ where
                             }
                         }
                     }
+
+                    let delta = DiffNotification::finish(self.type_, self.id.as_str()).serialize();
+                    for p_id in player_cxts.keys() {
+                        session_manager.send(*p_id, delta.clone());
+                    }
+
                     break;
                 }
                 if let Ok(event) = actions_rx.recv_timeout(self.action_timeout) {

@@ -8,6 +8,7 @@ use tokio_tungstenite::{
 };
 
 use crate::{
+    ThundersResult,
     protocol::{self, InputMessage, NetworkProtocol, SessionManager, ThundersError},
     runtime::GameRuntimeAnyHandle,
     schema::{Deserialize, Schema, SchemaType, Serialize},
@@ -34,7 +35,7 @@ impl NetworkProtocol for WebSocketProtocol {
         self,
         session_manager: Arc<SessionManager>,
         handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
-    ) -> Result<(), ThundersError>
+    ) -> ThundersResult
     where
         InputMessage: Deserialize<S>,
     {

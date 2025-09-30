@@ -39,11 +39,26 @@ where
 pub struct DiffNotification<'a> {
     pub type_: &'static str,
     pub id: &'a str,
+    pub finished: bool,
     pub data: Vec<u8>,
 }
 
 impl<'a> DiffNotification<'a> {
     pub fn new(type_: &'static str, id: &'a str, data: Vec<u8>) -> Self {
-        Self { type_, id, data }
+        Self {
+            type_,
+            id,
+            finished: false,
+            data,
+        }
+    }
+
+    pub fn finish(type_: &'static str, id: &'a str) -> Self {
+        Self {
+            type_,
+            id,
+            finished: true,
+            data: vec![],
+        }
     }
 }

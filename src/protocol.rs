@@ -1,4 +1,5 @@
 use crate::{
+    ThundersResult,
     core::context::PlayerContext,
     runtime::GameRuntimeAnyHandle,
     schema::{Deserialize, Schema, Serialize},
@@ -19,7 +20,7 @@ pub trait NetworkProtocol {
         self,
         session_manager: Arc<SessionManager>,
         handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
-    ) -> impl Future<Output = Result<(), ThundersError>>
+    ) -> impl Future<Output = ThundersResult>
     where
         InputMessage: Deserialize<S>;
 }
@@ -75,17 +76,26 @@ pub fn process_message<S: Schema>(
                 if let Some(handler) = handlers.get(type_.as_str()) {
                     session_manager.subscribe(player_cxt.id(), type_, id.clone());
                     handler.register(Arc::clone(&player_cxt), id, options);
+                } else {
+                    session_manager
+                        .send(player_cxt.id(), ThundersError::RoomTypeNotFound.serialize());
                 }
             }
             InputMessage::Join { type_, id } => {
                 if let Some(handler) = handlers.get(type_.as_str()) {
                     session_manager.subscribe(player_cxt.id(), type_, id.clone());
                     handler.join(Arc::clone(&player_cxt), id);
+                } else {
+                    session_manager
+                        .send(player_cxt.id(), ThundersError::RoomTypeNotFound.serialize());
                 }
             }
             InputMessage::Action { type_, id, data } => {
                 if let Some(handler) = handlers.get(type_.as_str()) {
                     let _ = handler.action(player_cxt.id(), id, data);
+                } else {
+                    session_manager
+                        .send(player_cxt.id(), ThundersError::RoomTypeNotFound.serialize());
                 }
             }
             _ => {}
@@ -177,6 +187,9 @@ pub enum InputMessage {
 pub enum ThundersError {
     StartFailure,
     MessageNotConnected,
+    RoomNotFound,
+    RoomAlreadyCreated,
+    RoomTypeNotFound,
     ConnectionFailure,
     InvalidInput,
     DeserializationFailure,

@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thunders::{
-    MultiPlayer,
+    ThundersResult, ThundersServer,
     core::{
         context::PlayerContext,
         hooks::{Diff, GameHooks},
@@ -16,8 +16,8 @@ use thunders::{
 };
 
 #[tokio::main]
-pub async fn main() {
-    MultiPlayer::new(WebSocketProtocol::new("127.0.0.1", 8080), Json::default())
+pub async fn main() -> ThundersResult {
+    ThundersServer::new(WebSocketProtocol::new("127.0.0.1", 8080), Json::default())
         .register::<SyncRuntime, Chat>(
             "lobby_chat",
             Settings {
@@ -26,7 +26,7 @@ pub async fn main() {
             },
         )
         .run()
-        .await;
+        .await
 }
 
 pub struct Chat {

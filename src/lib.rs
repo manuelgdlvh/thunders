@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     core::hooks::GameHooks,
-    protocol::{InputMessage, NetworkProtocol, SessionManager},
+    protocol::{InputMessage, NetworkProtocol, SessionManager, ThundersError},
     runtime::{GameRuntime, GameRuntimeAnyHandle, GameRuntimeHandle},
     schema::{Deserialize, Schema, Serialize},
 };
@@ -12,18 +12,18 @@ pub mod protocol;
 pub mod runtime;
 pub mod schema;
 
-pub struct MultiPlayer<N, S>
+pub struct ThundersServer<N, S>
 where
     N: NetworkProtocol,
     S: Schema,
 {
     protocol: N,
-    schema: S,
+    _schema: S,
     handlers: HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
     session_manager: Arc<SessionManager>,
 }
 
-impl<N, S> MultiPlayer<N, S>
+impl<N, S> ThundersServer<N, S>
 where
     N: NetworkProtocol,
     S: Schema + 'static,
@@ -31,7 +31,7 @@ where
     pub fn new(protocol: N, schema: S) -> Self {
         Self {
             protocol,
-            schema,
+            _schema: schema,
             handlers: Default::default(),
             session_manager: Arc::new(SessionManager::default()),
         }
@@ -58,13 +58,15 @@ where
         self
     }
 
-    pub async fn run(self)
+    pub async fn run(self) -> ThundersResult
     where
         InputMessage: Deserialize<S>,
     {
         let handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>> =
             Box::leak(Box::new(self.handlers));
 
-        self.protocol.run::<S>(self.session_manager, handlers).await;
+        self.protocol.run::<S>(self.session_manager, handlers).await
     }
 }
+
+pub type ThundersResult = Result<(), ThundersError>;
