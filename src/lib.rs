@@ -7,6 +7,7 @@ use crate::{
     schema::{Deserialize, Schema, Serialize},
 };
 
+pub mod client;
 pub mod core;
 pub mod protocol;
 pub mod runtime;

@@ -6,6 +6,7 @@ use std::{
 };
 use thunders::{
     ThundersResult, ThundersServer,
+    client::GameState,
     core::{
         context::PlayerContext,
         hooks::{Diff, GameHooks},
@@ -28,6 +29,14 @@ pub async fn main() -> ThundersResult {
         .run()
         .await
 }
+
+// Client
+
+pub struct ChatClient {
+    messages: Vec<ChatMessage>,
+}
+
+// Server
 
 pub struct Chat {
     messages: Vec<String>,

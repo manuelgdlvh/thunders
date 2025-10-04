@@ -26,6 +26,26 @@ impl Serialize<Json> for () {
     }
 }
 
+impl Serialize<Json> for InputMessage {
+    fn serialize(self) -> Vec<u8> {
+        const METHOD: &str = "method";
+        const CONNECT: &str = "connect";
+        const ID: &str = "id";
+
+        match self {
+            Self::Connect { id } => serde_json::json!({
+                "method": "connect",
+                "id": id
+            })
+            .to_string()
+            .into_bytes(),
+            _ => {
+                todo!()
+            }
+        }
+    }
+}
+
 impl Deserialize<Json> for InputMessage {
     fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
         const METHOD: &str = "method";
