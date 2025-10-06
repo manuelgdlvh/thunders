@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub struct PlayerContext {
     id: u64,
     attrs: HashMap<String, String>,

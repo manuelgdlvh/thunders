@@ -97,6 +97,7 @@ impl NetworkProtocol for WebSocketProtocol {
 
                     while let Some(Ok(msg)) = read.next().await {
                         let raw_message: Vec<u8> = message_into_bytes(msg);
+
                         protocol::process_message(
                             raw_message,
                             &player_cxt,

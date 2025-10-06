@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use serde_json::Value;
 
 use crate::{
@@ -39,6 +41,43 @@ impl Serialize<Json> for InputMessage {
             })
             .to_string()
             .into_bytes(),
+            Self::Create { type_, id, .. } => serde_json::json!({
+                "method": "create",
+                "type": type_,
+                "id": id
+            })
+            .to_string()
+            .into_bytes(),
+            Self::Join { type_, id } => serde_json::json!({
+                "method": "join",
+                "type": type_,
+                "id": id
+            })
+            .to_string()
+            .into_bytes(),
+
+            Self::Action {
+                type_,
+                id,
+                mut data,
+            } => {
+                let json = format!(
+                    r#"
+            {{
+            "method": "action",
+            "type" : "{}",
+            "id": "{}",
+            "data":               
+            "#,
+                    type_, id
+                );
+
+                let mut raw_message = json.into_bytes();
+                raw_message.append(&mut data);
+                raw_message.push(b'}');
+                raw_message
+            }
+
             _ => {
                 todo!()
             }
@@ -117,14 +156,12 @@ impl Deserialize<Json> for InputMessage {
                     .get(TYPE)
                     .ok_or(ThundersError::DeserializationFailure)?;
                 let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
-                let data: Vec<u8> = json
-                    .get(DATA)
-                    .and_then(|node| {
-                        serde_json::to_string(node)
-                            .map(|json| json.into_bytes())
-                            .ok()
-                    })
-                    .ok_or(ThundersError::DeserializationFailure)?;
+
+                let data: Vec<u8> = serde_json::to_vec(
+                    json.get(DATA)
+                        .ok_or(ThundersError::DeserializationFailure)?,
+                )
+                .map_err(|_| ThundersError::DeserializationFailure)?;
 
                 Ok(InputMessage::Action {
                     type_: type_
@@ -260,5 +297,39 @@ impl Serialize<Json> for DiffNotification<'_> {
             raw_message.push(b'}');
         }
         raw_message
+    }
+}
+
+// TODO: Standarize De/Serializers implementations
+impl Deserialize<Json> for DiffNotification<'_> {
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
+        let json = serde_json::from_slice::<Value>(value.as_slice()).unwrap();
+
+        let id = json
+            .get("id")
+            .ok_or(ThundersError::DeserializationFailure)?
+            .as_str()
+            .ok_or(ThundersError::DeserializationFailure)?
+            .to_string();
+
+        let type_ = json
+            .get("type")
+            .ok_or(ThundersError::DeserializationFailure)?
+            .as_str()
+            .ok_or(ThundersError::DeserializationFailure)?
+            .to_string();
+
+        let data: Vec<u8> = serde_json::to_vec(
+            json.get("data")
+                .ok_or(ThundersError::DeserializationFailure)?,
+        )
+        .map_err(|_| ThundersError::DeserializationFailure)?;
+
+        Ok(DiffNotification {
+            type_: Cow::Owned(type_),
+            id: Cow::Owned(id),
+            finished: false,
+            data,
+        })
     }
 }

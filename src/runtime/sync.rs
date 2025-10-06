@@ -314,6 +314,21 @@ where
     H: GameHooks,
 {
     fn event(&self, p_id: u64, event: Event<H>) {
-        self.actions.send((p_id, event)).expect("");
+        match &event {
+            Event::Action(action) => {
+                println!("SERVER received action: {:?}", action);
+            }
+            Event::Join(cxt) => {
+                println!("SERVER received join: {:?}", cxt);
+            }
+
+            Event::Leave(id) => {
+                println!("SERVER received leave: {:?}", id);
+            }
+        }
+
+        if let Err(_) = self.actions.send((p_id, event)) {
+            println!("Runtime Not Connected. Skipping Action.");
+        }
     }
 }

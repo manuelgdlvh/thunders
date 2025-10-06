@@ -1,12 +1,12 @@
-use serde_json::Value;
 use std::{
     collections::HashMap,
     sync::Arc,
+    thread,
     time::{Duration, Instant},
 };
 use thunders::{
-    ThundersResult, ThundersServer,
-    client::GameState,
+    ThundersServer,
+    client::{GameState, ThundersClientBuilder, WebSocketClientProtocol},
     core::{
         context::PlayerContext,
         hooks::{Diff, GameHooks},
@@ -17,23 +17,83 @@ use thunders::{
 };
 
 #[tokio::main]
-pub async fn main() -> ThundersResult {
-    ThundersServer::new(WebSocketProtocol::new("127.0.0.1", 8080), Json::default())
-        .register::<SyncRuntime, Chat>(
+pub async fn main() {
+    tokio::spawn(async move {
+        ThundersServer::new(WebSocketProtocol::new("127.0.0.1", 8080), Json::default())
+            .register::<SyncRuntime, Chat>(
+                "lobby_chat",
+                Settings {
+                    max_action_await_millis: 2000,
+                    tick_interval_millis: 100,
+                },
+            )
+            .run()
+            .await
+    });
+
+    let client_1 = spawn_client(1).await;
+    client_1
+        .create(
             "lobby_chat",
-            Settings {
-                max_action_await_millis: 2000,
-                tick_interval_millis: 100,
-            },
+            "Chat_1".to_string(),
+            ChatClient { messages: vec![] },
         )
-        .run()
-        .await
+        .await;
+
+    let client_2 = spawn_client(2).await;
+    client_2.join(
+        "lobby_chat",
+        "Chat_1".to_string(),
+        ChatClient { messages: vec![] },
+    );
+
+    let mut num_messages = 0;
+    loop {
+        client_1.action::<ChatClient>(
+            "lobby_chat",
+            "Chat_1".to_string(),
+            ChatAction::IncomingMessage(format!("#{num_messages} message from client_1")),
+        );
+        client_2.action::<ChatClient>(
+            "lobby_chat",
+            "Chat_1".to_string(),
+            ChatAction::IncomingMessage(format!("#{num_messages} message from client_2")),
+        );
+
+        thread::sleep(Duration::from_millis(250));
+        num_messages = num_messages + 1;
+        if num_messages == (4 * 60) {
+            break;
+        }
+    }
+}
+
+async fn spawn_client(id: u64) -> thunders::client::ThundersClient<Json> {
+    let mut client = ThundersClientBuilder::new(
+        WebSocketClientProtocol::new("127.0.0.1".to_string(), 8080),
+        Json::default(),
+    )
+    .register("lobby_chat")
+    .build()
+    .await;
+
+    client.connect(id).await;
+    client
 }
 
 // Client
 
 pub struct ChatClient {
     messages: Vec<ChatMessage>,
+}
+
+impl GameState for ChatClient {
+    type Action = ChatAction;
+    type Change = ChatDiff;
+
+    fn on_change(&mut self, change: Self::Change) {
+        println!("CLIENT received Change: {:?}", change);
+    }
 }
 
 // Server
@@ -122,44 +182,53 @@ impl GameHooks for Chat {
 }
 
 // Action
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum ChatAction {
     IncomingMessage(String),
 }
 
 impl Deserialize<Json> for ChatAction {
     fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
-        const TEXT: &str = "text";
-
-        if let Ok(json) = serde_json::from_slice::<Value>(&value) {
-            let text = json
-                .get(TEXT)
-                .ok_or(ThundersError::DeserializationFailure)?
-                .as_str()
-                .ok_or(ThundersError::DeserializationFailure)?
-                .to_string();
-            Ok(ChatAction::IncomingMessage(text))
+        if let Ok(serialized) = serde_json::from_slice(&value) {
+            Ok(serialized)
         } else {
-            Err(ThundersError::InvalidInput)
+            Err(ThundersError::DeserializationFailure)
         }
     }
 }
 
-#[derive(serde::Serialize)]
+impl Serialize<Json> for ChatAction {
+    fn serialize(self) -> Vec<u8> {
+        serde_json::to_vec(&self).expect("Should always be serializable")
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     from: u64,
     text: String,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum ChatDiff {
     MessagesAdded { messages: Vec<ChatMessage> },
     ChatClosed,
 }
 
+// TODO: Autoimplement if implement serde::DeSerialize
+
 impl Serialize<Json> for ChatDiff {
     fn serialize(self) -> Vec<u8> {
-        serde_json::to_string(&self)
-            .expect("Should always be serializable")
-            .into_bytes()
+        serde_json::to_vec(&self).expect("Should always be serializable")
+    }
+}
+
+impl Deserialize<Json> for ChatDiff {
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
+        if let Ok(serialized) = serde_json::from_slice(&value) {
+            Ok(serialized)
+        } else {
+            Err(ThundersError::DeserializationFailure)
+        }
     }
 }

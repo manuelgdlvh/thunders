@@ -1,13 +1,13 @@
 // Send actions and update the state. Each tick returns the delta.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
 use crate::core::context::PlayerContext;
 
 pub trait GameHooks: Send + 'static {
     type Delta: Send;
-    type Action: Send;
-    type Options: Default;
+    type Action: Send + std::fmt::Debug;
+    type Options: Default + std::fmt::Debug;
 
     fn build(options: Self::Options) -> Self;
     fn diff(
@@ -27,6 +27,7 @@ pub enum Diff<D> {
     Target { ids: Vec<u64>, delta: D },
 }
 
+#[derive(Debug)]
 pub enum Event<H>
 where
     H: GameHooks,
@@ -36,9 +37,10 @@ where
     Leave(u64),
 }
 
+#[derive(Debug)]
 pub struct DiffNotification<'a> {
-    pub type_: &'static str,
-    pub id: &'a str,
+    pub type_: Cow<'static, str>,
+    pub id: Cow<'a, str>,
     pub finished: bool,
     pub data: Vec<u8>,
 }
@@ -46,8 +48,8 @@ pub struct DiffNotification<'a> {
 impl<'a> DiffNotification<'a> {
     pub fn new(type_: &'static str, id: &'a str, data: Vec<u8>) -> Self {
         Self {
-            type_,
-            id,
+            type_: Cow::Borrowed(type_),
+            id: Cow::Borrowed(id),
             finished: false,
             data,
         }
@@ -55,8 +57,8 @@ impl<'a> DiffNotification<'a> {
 
     pub fn finish(type_: &'static str, id: &'a str) -> Self {
         Self {
-            type_,
-            id,
+            type_: Cow::Borrowed(type_),
+            id: Cow::Borrowed(id),
             finished: true,
             data: vec![],
         }
