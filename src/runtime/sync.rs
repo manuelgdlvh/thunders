@@ -11,7 +11,7 @@ use crate::{
         context::PlayerContext,
         hooks::{Diff, DiffNotification, Event, GameHooks},
     },
-    protocol::SessionManager,
+    protocol::{OutputMessage, SessionManager},
     runtime::{GameHandle, GameRuntime},
     schema::{Deserialize, Schema, Serialize},
 };
@@ -21,11 +21,31 @@ pub struct SyncRuntime {
     id: String,
     action_timeout: Duration,
     tick: Duration,
+    session_manager: Arc<SessionManager>,
+    players_cxt: HashMap<u64, Arc<PlayerContext>>,
 }
 
 pub struct Settings {
     pub max_action_await_millis: u64,
     pub tick_interval_millis: u64,
+}
+
+impl SyncRuntime {
+    fn process_diff<H: GameHooks, S: Schema>(&self, diff: Diff<H::Delta>)
+    where
+        H::Delta: Serialize<S>,
+    {
+        match diff {
+            Diff::All { delta } => {
+                let diff = DiffNotification::new(self.type_, self.id.as_str(), delta.serialize());
+                self.session_manager.send_all(self.players_cxt.keys(), diff);
+            }
+            Diff::Target { ids, delta } => {
+                let diff = DiffNotification::new(self.type_, self.id.as_str(), delta.serialize());
+                self.session_manager.send_all(ids.iter(), diff);
+            }
+        }
+    }
 }
 
 impl<H, S> GameRuntime<H, S> for SyncRuntime
@@ -35,25 +55,28 @@ where
     H::Delta: Serialize<S>,
     H::Options: Deserialize<S>,
     H::Action: Deserialize<S>,
-    for<'a> DiffNotification<'a>: Serialize<S>,
+    for<'a> OutputMessage<'a>: Serialize<S>,
 {
     type Handle = SyncGameHandle<H>;
     type Settings = Settings;
 
-    fn build(type_: &'static str, id: String, settings: &Self::Settings) -> Self {
+    fn build(
+        type_: &'static str,
+        id: String,
+        settings: &Self::Settings,
+        session_manager: Arc<SessionManager>,
+    ) -> Self {
         Self {
             id,
             type_,
             action_timeout: Duration::from_millis(settings.max_action_await_millis),
             tick: Duration::from_millis(settings.tick_interval_millis),
+            session_manager,
+            players_cxt: Default::default(),
         }
     }
 
-    fn start(
-        self,
-        options: <H as GameHooks>::Options,
-        session_manager: Arc<SessionManager>,
-    ) -> Self::Handle {
+    fn start(mut self, options: <H as GameHooks>::Options) -> Self::Handle {
         let mut hooks = H::build(options);
         let (actions_tx, actions_rx) = mpsc::channel::<(u64, Event<H>)>();
         let r_handle = thread::spawn(move || {
@@ -61,43 +84,16 @@ where
             let mut now;
             let mut tick;
 
-            let mut player_cxts: HashMap<u64, Arc<PlayerContext>> = HashMap::default();
             loop {
                 let (is_finished, diff_opt) = hooks.finish();
 
                 if is_finished {
                     if let Some(diff) = diff_opt {
-                        match diff {
-                            Diff::All { delta } => {
-                                let delta = DiffNotification::new(
-                                    self.type_,
-                                    self.id.as_str(),
-                                    delta.serialize(),
-                                )
-                                .serialize();
-                                for p_id in player_cxts.keys() {
-                                    session_manager.send(*p_id, delta.clone());
-                                }
-                            }
-                            Diff::Target { ids, delta } => {
-                                let delta = DiffNotification::new(
-                                    self.type_,
-                                    self.id.as_str(),
-                                    delta.serialize(),
-                                )
-                                .serialize();
-                                for &p_id in ids.iter() {
-                                    session_manager.send(p_id, delta.clone());
-                                }
-                            }
-                        }
+                        self.process_diff::<H, S>(diff);
                     }
 
-                    let delta = DiffNotification::finish(self.type_, self.id.as_str()).serialize();
-                    for p_id in player_cxts.keys() {
-                        session_manager.send(*p_id, delta.clone());
-                    }
-
+                    let diff = DiffNotification::finish(self.type_, self.id.as_str());
+                    self.session_manager.send_all(self.players_cxt.keys(), diff);
                     break;
                 }
                 if let Ok(event) = actions_rx.recv_timeout(self.action_timeout) {
@@ -109,69 +105,19 @@ where
                         }
 
                         Event::Leave(id) => {
-                            if let Some(player_context) = player_cxts.remove(&id) {
+                            if let Some(player_context) = self.players_cxt.remove(&id) {
                                 if let Some(diff) = hooks.leave(player_context.as_ref()) {
-                                    match diff {
-                                        Diff::All { delta } => {
-                                            let delta = DiffNotification::new(
-                                                self.type_,
-                                                self.id.as_str(),
-                                                delta.serialize(),
-                                            )
-                                            .serialize();
-
-                                            for p_id in player_cxts.keys() {
-                                                session_manager.send(*p_id, delta.clone());
-                                            }
-                                        }
-                                        Diff::Target { ids, delta } => {
-                                            let delta = DiffNotification::new(
-                                                self.type_,
-                                                self.id.as_str(),
-                                                delta.serialize(),
-                                            )
-                                            .serialize();
-
-                                            for &p_id in ids.iter() {
-                                                session_manager.send(p_id, delta.clone());
-                                            }
-                                        }
-                                    }
+                                    self.process_diff::<H, S>(diff);
                                 }
                             }
                             continue;
                         }
 
                         Event::Join(cxt) => {
-                            player_cxts.insert(cxt.id(), Arc::clone(&cxt));
+                            self.players_cxt.insert(cxt.id(), Arc::clone(&cxt));
                             if let Some(diffs) = hooks.join(cxt.as_ref()) {
                                 for diff in diffs {
-                                    match diff {
-                                        Diff::All { delta } => {
-                                            let delta = DiffNotification::new(
-                                                self.type_,
-                                                self.id.as_str(),
-                                                delta.serialize(),
-                                            )
-                                            .serialize();
-
-                                            for p_id in player_cxts.keys() {
-                                                session_manager.send(*p_id, delta.clone());
-                                            }
-                                        }
-                                        Diff::Target { ids, delta } => {
-                                            let delta = DiffNotification::new(
-                                                self.type_,
-                                                self.id.as_str(),
-                                                delta.serialize(),
-                                            )
-                                            .serialize();
-
-                                            for &p_id in ids.iter() {
-                                                session_manager.send(p_id, delta.clone());
-                                            }
-                                        }
-                                    }
+                                    self.process_diff::<H, S>(diff);
                                 }
                             }
                             continue;
@@ -187,68 +133,18 @@ where
                             actions_buffer.push((event.0, action));
                         }
                         Event::Leave(id) => {
-                            if let Some(player_context) = player_cxts.remove(&id) {
+                            if let Some(player_context) = self.players_cxt.remove(&id) {
                                 if let Some(diff) = hooks.leave(player_context.as_ref()) {
-                                    match diff {
-                                        Diff::All { delta } => {
-                                            let delta = DiffNotification::new(
-                                                self.type_,
-                                                self.id.as_str(),
-                                                delta.serialize(),
-                                            )
-                                            .serialize();
-
-                                            for p_id in player_cxts.keys() {
-                                                session_manager.send(*p_id, delta.clone());
-                                            }
-                                        }
-                                        Diff::Target { ids, delta } => {
-                                            let delta = DiffNotification::new(
-                                                self.type_,
-                                                self.id.as_str(),
-                                                delta.serialize(),
-                                            )
-                                            .serialize();
-
-                                            for &p_id in ids.iter() {
-                                                session_manager.send(p_id, delta.clone());
-                                            }
-                                        }
-                                    }
+                                    self.process_diff::<H, S>(diff);
                                 }
                             }
                         }
 
                         Event::Join(cxt) => {
-                            player_cxts.insert(cxt.id(), Arc::clone(&cxt));
+                            self.players_cxt.insert(cxt.id(), Arc::clone(&cxt));
                             if let Some(diffs) = hooks.join(cxt.as_ref()) {
                                 for diff in diffs {
-                                    match diff {
-                                        Diff::All { delta } => {
-                                            let delta = DiffNotification::new(
-                                                self.type_,
-                                                self.id.as_str(),
-                                                delta.serialize(),
-                                            )
-                                            .serialize();
-
-                                            for p_id in player_cxts.keys() {
-                                                session_manager.send(*p_id, delta.clone());
-                                            }
-                                        }
-                                        Diff::Target { ids, delta } => {
-                                            let delta = DiffNotification::new(
-                                                self.type_,
-                                                self.id.as_str(),
-                                                delta.serialize(),
-                                            )
-                                            .serialize();
-
-                                            for &p_id in ids.iter() {
-                                                session_manager.send(p_id, delta.clone());
-                                            }
-                                        }
-                                    }
+                                    self.process_diff::<H, S>(diff);
                                 }
                             }
                         }
@@ -261,33 +157,8 @@ where
                     }
                 }
 
-                for diff in hooks.diff(&player_cxts, actions_buffer.as_slice()) {
-                    match diff {
-                        Diff::All { delta } => {
-                            let delta = DiffNotification::new(
-                                self.type_,
-                                self.id.as_str(),
-                                delta.serialize(),
-                            )
-                            .serialize();
-
-                            for p_id in player_cxts.keys() {
-                                session_manager.send(*p_id, delta.clone());
-                            }
-                        }
-                        Diff::Target { ids, delta } => {
-                            let delta = DiffNotification::new(
-                                self.type_,
-                                self.id.as_str(),
-                                delta.serialize(),
-                            )
-                            .serialize();
-
-                            for &p_id in ids.iter() {
-                                session_manager.send(p_id, delta.clone());
-                            }
-                        }
-                    }
+                for diff in hooks.diff(&self.players_cxt, actions_buffer.as_slice()) {
+                    self.process_diff::<H, S>(diff);
                 }
 
                 hooks.update(mem::take(&mut actions_buffer));

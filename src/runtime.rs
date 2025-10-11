@@ -8,7 +8,7 @@ use crate::{
         context::PlayerContext,
         hooks::{Event, GameHooks},
     },
-    protocol::{SessionManager, ThundersError},
+    protocol::{SessionManager, ThundersServerError},
     schema::{Deserialize, Schema, Serialize},
 };
 
@@ -25,9 +25,14 @@ where
     type Handle: GameHandle<H>;
     type Settings: Send + Sync;
 
-    fn build(type_: &'static str, id: String, settings: &Self::Settings) -> Self;
+    fn build(
+        type_: &'static str,
+        id: String,
+        settings: &Self::Settings,
+        session_manager: Arc<SessionManager>,
+    ) -> Self;
 
-    fn start(self, options: H::Options, session_manager: Arc<SessionManager>) -> Self::Handle;
+    fn start(self, options: H::Options) -> Self::Handle;
 }
 
 // Add join and left player hooks
@@ -78,8 +83,13 @@ where
     }
 
     pub fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: H::Options) {
-        let runtime = R::build(self.type_, room_id.clone(), &self.settings);
-        let r_handle = runtime.start(options, Arc::clone(&self.session_manager));
+        let runtime = R::build(
+            self.type_,
+            room_id.clone(),
+            &self.settings,
+            Arc::clone(&self.session_manager),
+        );
+        let r_handle = runtime.start(options);
         r_handle.event(cxt.id(), Event::Join(cxt));
         if let Ok(mut handlers) = self.handlers.write() {
             handlers.insert(room_id, r_handle);
@@ -115,7 +125,8 @@ pub trait GameRuntimeAnyHandle: Send + Sync {
     fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: Option<Vec<u8>>);
     fn join(&self, cxt: Arc<PlayerContext>, room_id: String);
     fn leave(&self, cxt: u64, room_id: String);
-    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), ThundersError>;
+    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>)
+    -> Result<(), ThundersServerError>;
 }
 
 impl<R, H, S> GameRuntimeAnyHandle for GameRuntimeHandle<R, H, S>
@@ -134,7 +145,7 @@ where
                     self.register(cxt, room_id, options);
                 }
                 Err(err) => {
-                    self.session_manager.send(cxt.id(), err.serialize());
+                    self.session_manager.send(cxt.id(), err);
                 }
             }
         } else {
@@ -150,7 +161,12 @@ where
         self.leave(cxt, room_id);
     }
 
-    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), ThundersError> {
+    fn action(
+        &self,
+        cxt: u64,
+        room_id: String,
+        action: Vec<u8>,
+    ) -> Result<(), ThundersServerError> {
         match <H::Action as Deserialize<S>>::deserialize(action) {
             Ok(action) => {
                 self.action(cxt, room_id, action);

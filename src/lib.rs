@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     core::hooks::GameHooks,
-    protocol::{InputMessage, NetworkProtocol, SessionManager, ThundersError},
+    protocol::{InputMessage, NetworkProtocol, SessionManager, ThundersServerError},
     runtime::{GameRuntime, GameRuntimeAnyHandle, GameRuntimeHandle},
     schema::{Deserialize, Schema, Serialize},
 };
@@ -59,7 +59,7 @@ where
         self
     }
 
-    pub async fn run(self) -> ThundersResult
+    pub async fn run(self) -> ThundersServerResult
     where
         InputMessage: Deserialize<S>,
     {
@@ -70,4 +70,4 @@ where
     }
 }
 
-pub type ThundersResult = Result<(), ThundersError>;
+pub type ThundersServerResult = Result<(), ThundersServerError>;

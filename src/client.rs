@@ -1,9 +1,13 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock, atomic::AtomicBool},
+    time::{Duration, Instant},
 };
 
+use std::sync::atomic::Ordering::Release;
+
 use futures::{SinkExt, StreamExt};
+use reply_maybe::ReplyManager;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_tungstenite::{
     connect_async,
@@ -11,15 +15,13 @@ use tokio_tungstenite::{
 };
 
 use crate::{
-    core::hooks::DiffNotification,
-    protocol::InputMessage,
+    protocol::{InputMessage, OutputMessage},
     schema::{Deserialize, Schema, Serialize},
 };
 
 pub trait GameState {
     type Change: std::fmt::Debug;
     type Action;
-
     fn on_change(&mut self, change: Self::Change);
 }
 
@@ -27,7 +29,7 @@ pub trait GenericGameState<S>
 where
     S: Schema,
 {
-    fn on_change(&mut self, change: Vec<u8>);
+    fn on_change(&mut self, change: Vec<u8>) -> Result<(), ThundersClientError>;
 }
 
 impl<S, T> GenericGameState<S> for T
@@ -36,11 +38,12 @@ where
     T: GameState,
     T::Change: Deserialize<S> + std::fmt::Debug,
 {
-    fn on_change(&mut self, change: Vec<u8>) {
+    fn on_change(&mut self, change: Vec<u8>) -> Result<(), ThundersClientError> {
         if let Ok(change) = <T::Change as Deserialize<S>>::deserialize(change) {
             self.on_change(change);
+            Ok(())
         } else {
-            println!("Ignored message");
+            Err(ThundersClientError::UnknownMessage)
         }
     }
 }
@@ -51,16 +54,22 @@ pub struct ActiveGames<S: Schema> {
 }
 
 impl<S: Schema> ActiveGames<S> {
-    pub fn route_message(&self, type_: &str, id: &str, message: Vec<u8>) {
-        self.current
+    pub fn route_message(
+        &self,
+        type_: &str,
+        id: &str,
+        message: Vec<u8>,
+    ) -> Result<(), ThundersClientError> {
+        Ok(self
+            .current
             .get(type_)
-            .expect("Type should always exists")
+            .ok_or(ThundersClientError::RoomTypeNotFound)?
             .write()
-            .unwrap()
+            .expect("Should always get write lock successfully")
             .get_mut(id)
-            .unwrap()
+            .ok_or(ThundersClientError::RoomNotFound)?
             .as_mut()
-            .on_change(message);
+            .on_change(message)?)
     }
 
     pub fn create<G: GameState + Send + Sync + 'static>(
@@ -68,33 +77,38 @@ impl<S: Schema> ActiveGames<S> {
         type_: &'static str,
         id: String,
         game: G,
-    ) where
+    ) -> Result<(), ThundersClientError>
+    where
         G::Change: Deserialize<S>,
     {
         self.current
             .get(type_)
-            .expect("Type should always exists")
+            .ok_or(ThundersClientError::RoomTypeNotFound)?
             .write()
-            .unwrap()
+            .expect("Should always get write lock successfully")
             .insert(
                 id,
                 Box::new(game) as Box<dyn GenericGameState<S> + Send + Sync>,
             );
+
+        Ok(())
     }
 }
 
 pub struct ClientProtocolHandle {
-    sender: UnboundedSender<Vec<u8>>,
+    sender: UnboundedSender<InboundAction>,
+    reply_manager: Arc<ReplyManager<String, (), ThundersClientError>>,
+    running: Arc<AtomicBool>,
 }
 
 pub trait ClientProtocol {
     fn run<S>(
         self,
         active_games: Arc<ActiveGames<S>>,
-    ) -> impl Future<Output = ClientProtocolHandle>
+    ) -> impl Future<Output = Result<ClientProtocolHandle, ThundersClientError>>
     where
         S: Schema + 'static,
-        for<'a> DiffNotification<'a>: Deserialize<S>;
+        for<'a> OutputMessage<'a>: Deserialize<S>;
 }
 
 pub struct WebSocketClientProtocol {
@@ -109,43 +123,112 @@ impl WebSocketClientProtocol {
 }
 
 impl ClientProtocol for WebSocketClientProtocol {
-    async fn run<S>(self, active_games: Arc<ActiveGames<S>>) -> ClientProtocolHandle
+    async fn run<S>(
+        self,
+        active_games: Arc<ActiveGames<S>>,
+    ) -> Result<ClientProtocolHandle, ThundersClientError>
     where
         S: Schema + 'static,
-        for<'a> DiffNotification<'a>: Deserialize<S>,
+        for<'a> OutputMessage<'a>: Deserialize<S>,
     {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let (in_action_tx, mut in_action_rx) =
+            tokio::sync::mpsc::unbounded_channel::<InboundAction>();
 
         let request = format!("ws://{}:{}", self.addr, self.port)
             .into_client_request()
-            .unwrap();
-        let (stream, _) = connect_async(request).await.unwrap();
-        let (mut ws_writer, mut ws_receiver) = stream.split();
-        tokio::spawn(async move {
-            loop {
-                // Add stop in Drop for client
-                tokio::select! {
-                     Some(raw_action) = rx.recv() => {
-                         ws_writer
-                             .send(tungstenite::Message::Binary(raw_action.into()))
-                             .await
-                             .unwrap();
-                     },
-                     Some(Ok(message)) = ws_receiver.next() => {
-                        let raw_message = message_into_bytes(message);
-                        if let Ok(notification) = <DiffNotification as Deserialize<S>>::deserialize(raw_message){
-                            active_games.route_message(notification.type_.as_ref(), notification.id.as_ref(), notification.data);
-                        }else{
-                            println!("Ignored message");
-                         }
-                     },
+            .map_err(|_| ThundersClientError::ConnectionFailure)?;
+        let (stream, _) = connect_async(request)
+            .await
+            .map_err(|_| ThundersClientError::ConnectionFailure)?;
 
+        let (mut ws_writer, mut ws_receiver) = stream.split();
+
+        let running = Arc::new(AtomicBool::new(true));
+
+        let reply_manager = Arc::new(ReplyManager::<String, (), ThundersClientError>::new(
+            tokio::time::Duration::new(1, 0),
+        ));
+        tokio::spawn({
+            let running = Arc::clone(&running);
+            let reply_manager = Arc::clone(&reply_manager);
+            async move {
+                let running = Arc::clone(&running);
+                loop {
+                    // Add stop in Drop for client
+                    tokio::select! {
+                         _ = reply_manager.vacuum() => {},
+                         Some(inbound_action) = in_action_rx.recv() => {
+
+                             match inbound_action {
+                                 InboundAction::Raw(data) => {
+
+                            if let Err(_) = ws_writer
+                                 .send(tungstenite::Message::Binary(data.into()))
+                                 .await {
+                                     running.swap(false, Release);
+                                     break;
+                                }
+                             }
+
+                                 InboundAction::Stop => {
+                                     running.swap(false, Release);
+                                     break;
+                                 }
+                             }
+                         },
+                         Some(Ok(message)) = ws_receiver.next() => {
+                            let raw_message = message_into_bytes(message);
+                            if let Ok(output) = <OutputMessage as Deserialize<S>>::deserialize(raw_message) {
+                                           match output {
+                                                OutputMessage::Connect{correlation_id, success} => {
+                                                    if success {
+                                                        reply_manager.ok(&correlation_id.into_owned(), ());
+                                                    }else {
+                                                        reply_manager.error(&correlation_id.into_owned(), ThundersClientError::ConnectionFailure);
+                                                    }
+                                               },
+                                               OutputMessage::Diff{type_, id, finished, data} => {
+
+                                                   if let Err(err) = active_games.route_message(type_.as_ref(), id.as_ref(), data){
+                                                        println!("{:?}", err);
+                                                   }
+
+                                               }
+                                               OutputMessage::GenericError {description} => {
+                                                   println!("{}", description);
+                                               }
+                                        }
+                            } else {
+                                println!("Ignored message");
+                             }
+                         },
+
+                    }
                 }
             }
         });
 
-        ClientProtocolHandle { sender: tx }
+        Ok(ClientProtocolHandle {
+            sender: in_action_tx,
+            reply_manager,
+            running,
+        })
     }
+}
+
+pub enum InboundAction {
+    Raw(Vec<u8>),
+    Stop,
+}
+
+#[derive(Debug)]
+pub enum ThundersClientError {
+    ConnectionFailure,
+    NotRunning,
+    RoomNotFound,
+    RoomTypeNotFound,
+    UnknownMessage,
+    NoResponse,
 }
 
 fn message_into_bytes(message: Message) -> Vec<u8> {
@@ -225,32 +308,45 @@ where
         self
     }
 
-    pub async fn build(self) -> ThundersClient<S>
+    pub async fn build(self) -> Result<ThundersClient<S>, ThundersClientError>
     where
-        for<'a> DiffNotification<'a>: Deserialize<S>,
+        for<'a> OutputMessage<'a>: Deserialize<S>,
     {
-        let p_handle = self.protocol.run(Arc::clone(&self.active_games)).await;
+        let p_handle = self.protocol.run(Arc::clone(&self.active_games)).await?;
 
-        ThundersClient::<S> {
+        Ok(ThundersClient::<S> {
             p_handle,
             active_games: self.active_games,
-            connected: false,
-        }
+        })
     }
 }
 
 pub struct ThundersClient<S: Schema> {
     p_handle: ClientProtocolHandle,
     active_games: Arc<ActiveGames<S>>,
-    connected: bool,
 }
 
 impl<S: Schema + 'static> ThundersClient<S> {
     // Add awaitable callback with timeout to know if successfully created or joined
 
-    pub async fn connect(&mut self, id: u64) {
-        self.try_send(InputMessage::Connect { id });
-        self.connected = true;
+    pub async fn connect(&mut self, id: u64) -> Result<(), ThundersClientError> {
+        let correlation_id = format!("{:?}", Instant::now());
+        let awaitable = self
+            .p_handle
+            .reply_manager
+            .register(correlation_id.clone(), Duration::from_secs(5));
+
+        self.try_send(InputMessage::Connect { correlation_id, id });
+
+        if let Ok(reply) = awaitable.await {
+            match reply {
+                reply_maybe::Reply::Timeout => Err(ThundersClientError::NoResponse),
+                reply_maybe::Reply::Err(err) => Err(err),
+                _ => Ok(()),
+            }
+        } else {
+            Err(ThundersClientError::NoResponse)
+        }
     }
 
     pub async fn create<G: GameState + Send + Sync + 'static>(
@@ -261,7 +357,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
     ) where
         G::Change: Deserialize<S>,
     {
-        self.active_games.create(type_, id.clone(), game);
+        let _ = self.active_games.create(type_, id.clone(), game);
         self.try_send(InputMessage::Create {
             type_: type_.to_string(),
             id,
@@ -278,14 +374,13 @@ impl<S: Schema + 'static> ThundersClient<S> {
         G::Change: Deserialize<S>,
     {
         // TODO: Change this
-        self.active_games.create(type_, id.clone(), game);
+        let _ = self.active_games.create(type_, id.clone(), game);
         self.try_send(InputMessage::Join {
             type_: type_.to_string(),
             id,
         });
     }
 
-    // Change to references not owned
     pub fn action<G: GameState + 'static>(&self, type_: &'static str, id: String, action: G::Action)
     where
         G::Action: Serialize<S>,
@@ -298,6 +393,18 @@ impl<S: Schema + 'static> ThundersClient<S> {
     }
 
     fn try_send(&self, message: InputMessage) {
-        self.p_handle.sender.send(message.serialize()).unwrap();
+        self.p_handle
+            .sender
+            .send(InboundAction::Raw(message.serialize()))
+            .unwrap();
+    }
+}
+
+impl<S> Drop for ThundersClient<S>
+where
+    S: Schema,
+{
+    fn drop(&mut self) {
+        self.p_handle.sender.send(InboundAction::Stop).unwrap();
     }
 }

@@ -1,4 +1,4 @@
-use crate::protocol::ThundersError;
+use crate::protocol::{OutputMessage, ThundersServerError};
 
 pub mod json;
 
@@ -16,7 +16,7 @@ where
     S: Schema,
     Self: Sized,
 {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError>;
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersServerError>;
 }
 
 pub trait Serialize<S>

@@ -8,8 +8,10 @@ use tokio_tungstenite::{
 };
 
 use crate::{
-    ThundersResult,
-    protocol::{self, InputMessage, NetworkProtocol, SessionManager, ThundersError},
+    ThundersServerResult,
+    protocol::{
+        self, InputMessage, NetworkProtocol, OutputMessage, SessionManager, ThundersServerError,
+    },
     runtime::GameRuntimeAnyHandle,
     schema::{Deserialize, Schema, SchemaType, Serialize},
 };
@@ -35,13 +37,13 @@ impl NetworkProtocol for WebSocketProtocol {
         self,
         session_manager: Arc<SessionManager>,
         handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
-    ) -> ThundersResult
+    ) -> ThundersServerResult
     where
         InputMessage: Deserialize<S>,
     {
         let listener = TcpListener::bind(format!("{}:{}", self.addr, self.port).as_str())
             .await
-            .map_err(|_| ThundersError::StartFailure)?;
+            .map_err(|_| ThundersServerError::StartFailure)?;
 
         loop {
             let session_manager = Arc::clone(&session_manager);
@@ -82,15 +84,18 @@ impl NetworkProtocol for WebSocketProtocol {
                                 });
                             }
                             Err(err) => {
-                                let _ = write.send(bytes_into_message::<S>(err.serialize())).await;
+                                let output_message: OutputMessage<'_> = err.into();
+                                let _ = write
+                                    .send(bytes_into_message::<S>(output_message.serialize()))
+                                    .await;
                                 return;
                             }
                         }
                     } else {
+                        let output_message: OutputMessage<'_> =
+                            ThundersServerError::MessageNotConnected.into();
                         let _ = write
-                            .send(bytes_into_message::<S>(
-                                ThundersError::MessageNotConnected.serialize(),
-                            ))
+                            .send(bytes_into_message::<S>(output_message.serialize()))
                             .await;
                         return;
                     }

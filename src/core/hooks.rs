@@ -2,7 +2,7 @@
 
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
-use crate::core::context::PlayerContext;
+use crate::{core::context::PlayerContext, protocol::OutputMessage};
 
 pub trait GameHooks: Send + 'static {
     type Delta: Send;
@@ -39,8 +39,8 @@ where
 
 #[derive(Debug)]
 pub struct DiffNotification<'a> {
-    pub type_: Cow<'static, str>,
-    pub id: Cow<'a, str>,
+    pub type_: &'static str,
+    pub id: &'a str,
     pub finished: bool,
     pub data: Vec<u8>,
 }
@@ -48,8 +48,8 @@ pub struct DiffNotification<'a> {
 impl<'a> DiffNotification<'a> {
     pub fn new(type_: &'static str, id: &'a str, data: Vec<u8>) -> Self {
         Self {
-            type_: Cow::Borrowed(type_),
-            id: Cow::Borrowed(id),
+            type_,
+            id,
             finished: false,
             data,
         }
@@ -57,10 +57,21 @@ impl<'a> DiffNotification<'a> {
 
     pub fn finish(type_: &'static str, id: &'a str) -> Self {
         Self {
-            type_: Cow::Borrowed(type_),
-            id: Cow::Borrowed(id),
+            type_,
+            id,
             finished: true,
             data: vec![],
+        }
+    }
+}
+
+impl<'a> Into<OutputMessage<'a>> for DiffNotification<'a> {
+    fn into(self) -> OutputMessage<'a> {
+        OutputMessage::Diff {
+            type_: Cow::Borrowed(self.type_),
+            id: Cow::Owned(self.id.to_string()),
+            finished: self.finished,
+            data: self.data,
         }
     }
 }

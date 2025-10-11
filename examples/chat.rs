@@ -11,7 +11,7 @@ use thunders::{
         context::PlayerContext,
         hooks::{Diff, GameHooks},
     },
-    protocol::{ThundersError, ws::WebSocketProtocol},
+    protocol::{ThundersServerError, ws::WebSocketProtocol},
     runtime::sync::{Settings, SyncRuntime},
     schema::{Deserialize, Serialize, json::Json},
 };
@@ -75,9 +75,12 @@ async fn spawn_client(id: u64) -> thunders::client::ThundersClient<Json> {
     )
     .register("lobby_chat")
     .build()
-    .await;
+    .await
+    .expect("Should initialize client successfully");
 
-    client.connect(id).await;
+    if let Err(err) = client.connect(id).await {
+        panic!("{:?}", err);
+    }
     client
 }
 
@@ -188,11 +191,11 @@ pub enum ChatAction {
 }
 
 impl Deserialize<Json> for ChatAction {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersServerError> {
         if let Ok(serialized) = serde_json::from_slice(&value) {
             Ok(serialized)
         } else {
-            Err(ThundersError::DeserializationFailure)
+            Err(ThundersServerError::DeserializationFailure)
         }
     }
 }
@@ -224,11 +227,11 @@ impl Serialize<Json> for ChatDiff {
 }
 
 impl Deserialize<Json> for ChatDiff {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersServerError> {
         if let Ok(serialized) = serde_json::from_slice(&value) {
             Ok(serialized)
         } else {
-            Err(ThundersError::DeserializationFailure)
+            Err(ThundersServerError::DeserializationFailure)
         }
     }
 }

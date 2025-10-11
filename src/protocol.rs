@@ -1,10 +1,11 @@
 use crate::{
-    ThundersResult,
+    ThundersServerResult,
     core::context::PlayerContext,
     runtime::GameRuntimeAnyHandle,
     schema::{Deserialize, Schema, Serialize},
 };
 use std::{
+    borrow::Cow,
     collections::HashMap,
     error::Error,
     fmt::Display,
@@ -20,7 +21,7 @@ pub trait NetworkProtocol {
         self,
         session_manager: Arc<SessionManager>,
         handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
-    ) -> impl Future<Output = ThundersResult>
+    ) -> impl Future<Output = ThundersServerResult>
     where
         InputMessage: Deserialize<S>;
 }
@@ -45,20 +46,20 @@ pub fn disconnect(
 pub fn connect<S: Schema>(
     raw_message: Vec<u8>,
     session_manager: &SessionManager,
-) -> Result<(Arc<PlayerContext>, UnboundedReceiver<Vec<u8>>), ThundersError>
+) -> Result<(Arc<PlayerContext>, UnboundedReceiver<Vec<u8>>), ThundersServerError>
 where
     InputMessage: Deserialize<S>,
 {
     if let Ok(message) = <InputMessage as Deserialize<S>>::deserialize(raw_message) {
         match message {
-            InputMessage::Connect { id } => {
+            InputMessage::Connect { correlation_id, id } => {
                 let player_cxt = Arc::new(PlayerContext::new(id));
-                Ok((player_cxt, session_manager.connect(id)))
+                Ok((player_cxt, session_manager.connect(correlation_id, id)))
             }
-            _ => Err(ThundersError::MessageNotConnected),
+            _ => Err(ThundersServerError::MessageNotConnected),
         }
     } else {
-        Err(ThundersError::MessageNotConnected)
+        Err(ThundersServerError::MessageNotConnected)
     }
 }
 
@@ -77,8 +78,7 @@ pub fn process_message<S: Schema>(
                     session_manager.subscribe(player_cxt.id(), type_, id.clone());
                     handler.register(Arc::clone(&player_cxt), id, options);
                 } else {
-                    session_manager
-                        .send(player_cxt.id(), ThundersError::RoomTypeNotFound.serialize());
+                    session_manager.send(player_cxt.id(), ThundersServerError::RoomTypeNotFound);
                 }
             }
             InputMessage::Join { type_, id } => {
@@ -86,25 +86,18 @@ pub fn process_message<S: Schema>(
                     session_manager.subscribe(player_cxt.id(), type_, id.clone());
                     handler.join(Arc::clone(&player_cxt), id);
                 } else {
-                    session_manager
-                        .send(player_cxt.id(), ThundersError::RoomTypeNotFound.serialize());
+                    session_manager.send(player_cxt.id(), ThundersServerError::RoomTypeNotFound);
                 }
             }
             InputMessage::Action { type_, id, data } => {
                 if let Some(handler) = handlers.get(type_.as_str()) {
                     let _ = handler.action(player_cxt.id(), id, data);
-                } else {
-                    session_manager
-                        .send(player_cxt.id(), ThundersError::RoomTypeNotFound.serialize());
                 }
             }
             _ => {}
         }
     } else {
-        session_manager.send(
-            player_cxt.id(),
-            ThundersError::DeserializationFailure.serialize(),
-        );
+        session_manager.send(player_cxt.id(), ThundersServerError::DeserializationFailure);
     }
 }
 
@@ -117,8 +110,17 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
-    pub fn connect(&self, player_id: u64) -> UnboundedReceiver<Vec<u8>> {
+    pub fn connect(&self, correlation_id: String, player_id: u64) -> UnboundedReceiver<Vec<u8>> {
         let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
+
+        tx.send(
+            OutputMessage::Connect {
+                correlation_id: Cow::Owned(correlation_id),
+                success: true,
+            }
+            .serialize(),
+        )
+        .unwrap();
         if let Ok(mut sessions) = self.sessions.write() {
             sessions.insert(player_id, tx);
         }
@@ -153,11 +155,27 @@ impl SessionManager {
             .remove(&player_id)
     }
 
-    pub fn send(&self, player_id: u64, message: Vec<u8>) {
+    pub fn send<'a>(&self, player_id: u64, message: impl Into<OutputMessage<'a>>) {
         if let Ok(sessions) = self.sessions.read()
             && let Some(session) = sessions.get(&player_id)
         {
-            let _ = session.send(message);
+            let _ = session.send(message.into().serialize());
+        }
+    }
+
+    pub fn send_all<'a>(
+        &self,
+        player_ids: impl Iterator<Item = &'a u64>,
+        message: impl Into<OutputMessage<'a>>,
+    ) {
+        let raw_message = message.into().serialize();
+
+        for p_id in player_ids {
+            if let Ok(sessions) = self.sessions.read()
+                && let Some(session) = sessions.get(&p_id)
+            {
+                let _ = session.send(raw_message.clone());
+            }
         }
     }
 }
@@ -165,6 +183,7 @@ impl SessionManager {
 // Change io Error to custom Error type
 pub enum InputMessage {
     Connect {
+        correlation_id: String,
         id: u64,
     },
     Create {
@@ -183,8 +202,36 @@ pub enum InputMessage {
     },
 }
 
+pub enum OutputMessage<'a> {
+    Connect {
+        correlation_id: Cow<'a, str>,
+        success: bool,
+    },
+
+    Diff {
+        type_: Cow<'static, str>,
+        id: Cow<'a, str>,
+        finished: bool,
+        data: Vec<u8>,
+    },
+    GenericError {
+        description: Cow<'static, str>,
+    },
+}
+
+impl<'a> Into<OutputMessage<'a>> for ThundersServerError {
+    fn into(self) -> OutputMessage<'a> {
+        let description = match self {
+            _ => "Generic error, please provide more details",
+        };
+        OutputMessage::GenericError {
+            description: Cow::Borrowed(description),
+        }
+    }
+}
+
 #[derive(Debug)]
-pub enum ThundersError {
+pub enum ThundersServerError {
     StartFailure,
     MessageNotConnected,
     RoomNotFound,
@@ -195,10 +242,10 @@ pub enum ThundersError {
     DeserializationFailure,
 }
 
-impl Display for ThundersError {
+impl Display for ThundersServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Ok(())
     }
 }
 
-impl Error for ThundersError {}
+impl Error for ThundersServerError {}
