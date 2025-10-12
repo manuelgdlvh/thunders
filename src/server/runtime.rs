@@ -4,12 +4,15 @@ use std::{
 };
 
 use crate::{
-    core::{
+    api::{
+        error::ThundersError,
+        schema::{Deserialize, Schema, Serialize},
+    },
+    server::{
         context::PlayerContext,
         hooks::{Event, GameHooks},
+        protocol::SessionManager,
     },
-    protocol::{SessionManager, ThundersServerError},
-    schema::{Deserialize, Schema, Serialize},
 };
 
 pub mod sync;
@@ -125,8 +128,7 @@ pub trait GameRuntimeAnyHandle: Send + Sync {
     fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: Option<Vec<u8>>);
     fn join(&self, cxt: Arc<PlayerContext>, room_id: String);
     fn leave(&self, cxt: u64, room_id: String);
-    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>)
-    -> Result<(), ThundersServerError>;
+    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), ThundersError>;
 }
 
 impl<R, H, S> GameRuntimeAnyHandle for GameRuntimeHandle<R, H, S>
@@ -161,12 +163,7 @@ where
         self.leave(cxt, room_id);
     }
 
-    fn action(
-        &self,
-        cxt: u64,
-        room_id: String,
-        action: Vec<u8>,
-    ) -> Result<(), ThundersServerError> {
+    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), ThundersError> {
         match <H::Action as Deserialize<S>>::deserialize(action) {
             Ok(action) => {
                 self.action(cxt, room_id, action);

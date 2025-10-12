@@ -2,8 +2,9 @@ use std::borrow::Cow;
 
 use serde_json::Value;
 
-use crate::{
-    protocol::{InputMessage, OutputMessage, ThundersServerError},
+use crate::api::{
+    error::ThundersError,
+    message::{InputMessage, OutputMessage},
     schema::{Deserialize, Schema, SchemaType, Serialize},
 };
 
@@ -17,7 +18,7 @@ impl Schema for Json {
 }
 
 impl Deserialize<Json> for () {
-    fn deserialize(_value: Vec<u8>) -> Result<Self, ThundersServerError> {
+    fn deserialize(_value: Vec<u8>) -> Result<Self, ThundersError> {
         Ok(())
     }
 }
@@ -83,7 +84,7 @@ impl Serialize<Json> for InputMessage {
 }
 
 impl Deserialize<Json> for InputMessage {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersServerError> {
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
         const METHOD: &str = "method";
         const CORRELATION_ID: &str = "correlation_id";
         const CONNECT: &str = "connect";
@@ -96,35 +97,34 @@ impl Deserialize<Json> for InputMessage {
         const JOIN: &str = "join";
 
         let json: Value = serde_json::from_slice(value.as_slice())
-            .map_err(|_| ThundersServerError::InvalidInput)?;
+            .map_err(|_| ThundersError::DeserializationFailure)?;
 
-        let method = json.get(METHOD).ok_or(ThundersServerError::InvalidInput)?;
-        match method.as_str().ok_or(ThundersServerError::InvalidInput)? {
+        let method = json
+            .get(METHOD)
+            .ok_or(ThundersError::DeserializationFailure)?;
+        match method
+            .as_str()
+            .ok_or(ThundersError::DeserializationFailure)?
+        {
             CONNECT => {
-                let id = json
-                    .get(ID)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
                 let correlation_id = json
                     .get(CORRELATION_ID)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                    .ok_or(ThundersError::DeserializationFailure)?;
                 Ok(InputMessage::Connect {
                     correlation_id: correlation_id
                         .as_str()
-                        .ok_or(ThundersServerError::DeserializationFailure)?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
-                    id: id
-                        .as_u64()
-                        .ok_or(ThundersServerError::DeserializationFailure)?,
+                    id: id.as_u64().ok_or(ThundersError::DeserializationFailure)?,
                 })
             }
             CREATE => {
                 let type_ = json
                     .get(TYPE)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                    .ok_or(ThundersError::DeserializationFailure)?;
 
-                let id = json
-                    .get(ID)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
 
                 let options: Option<Vec<u8>> = json.get(OPTIONS).and_then(|node| {
                     serde_json::to_string(node)
@@ -135,11 +135,11 @@ impl Deserialize<Json> for InputMessage {
                 Ok(InputMessage::Create {
                     type_: type_
                         .as_str()
-                        .ok_or(ThundersServerError::DeserializationFailure)?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                     id: id
                         .as_str()
-                        .ok_or(ThundersServerError::DeserializationFailure)?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                     options,
                 })
@@ -148,49 +148,45 @@ impl Deserialize<Json> for InputMessage {
             JOIN => {
                 let type_ = json
                     .get(TYPE)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                    .ok_or(ThundersError::DeserializationFailure)?;
 
-                let id = json
-                    .get(ID)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
                 Ok(InputMessage::Join {
                     type_: type_
                         .as_str()
-                        .ok_or(ThundersServerError::DeserializationFailure)?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                     id: id
                         .as_str()
-                        .ok_or(ThundersServerError::DeserializationFailure)?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                 })
             }
             ACTION => {
                 let type_ = json
                     .get(TYPE)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
-                let id = json
-                    .get(ID)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                    .ok_or(ThundersError::DeserializationFailure)?;
+                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
 
                 let data: Vec<u8> = serde_json::to_vec(
                     json.get(DATA)
-                        .ok_or(ThundersServerError::DeserializationFailure)?,
+                        .ok_or(ThundersError::DeserializationFailure)?,
                 )
-                .map_err(|_| ThundersServerError::DeserializationFailure)?;
+                .map_err(|_| ThundersError::DeserializationFailure)?;
 
                 Ok(InputMessage::Action {
                     type_: type_
                         .as_str()
-                        .ok_or(ThundersServerError::DeserializationFailure)?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                     id: id
                         .as_str()
-                        .ok_or(ThundersServerError::DeserializationFailure)?
+                        .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
                     data,
                 })
             }
-            &_ => Err(ThundersServerError::InvalidInput),
+            &_ => Err(ThundersError::DeserializationFailure),
         }
     }
 }
@@ -261,42 +257,45 @@ impl<'a> Serialize<Json> for OutputMessage<'a> {
 }
 
 impl<'a> Deserialize<Json> for OutputMessage<'a> {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersServerError> {
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
         let json: Value = serde_json::from_slice(value.as_slice())
-            .map_err(|_| ThundersServerError::InvalidInput)?;
+            .map_err(|_| ThundersError::DeserializationFailure)?;
 
-        let method = json.get(METHOD).ok_or(ThundersServerError::InvalidInput)?;
-        match method.as_str().ok_or(ThundersServerError::InvalidInput)? {
+        let method = json
+            .get(METHOD)
+            .ok_or(ThundersError::DeserializationFailure)?;
+        match method
+            .as_str()
+            .ok_or(ThundersError::DeserializationFailure)?
+        {
             CONNECT => {
                 let success = json
                     .get(SUCCESS)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                    .ok_or(ThundersError::DeserializationFailure)?;
                 let correlation_id = json
                     .get(CORRELATION_ID)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                    .ok_or(ThundersError::DeserializationFailure)?;
                 Ok(OutputMessage::Connect {
                     correlation_id: Cow::Owned(
                         correlation_id
                             .as_str()
-                            .ok_or(ThundersServerError::DeserializationFailure)?
+                            .ok_or(ThundersError::DeserializationFailure)?
                             .to_string(),
                     ),
                     success: success
                         .as_bool()
-                        .ok_or(ThundersServerError::DeserializationFailure)?,
+                        .ok_or(ThundersError::DeserializationFailure)?,
                 })
             }
 
             DIFF => {
                 let type_ = json
                     .get(TYPE)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
-                let id = json
-                    .get(ID)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                    .ok_or(ThundersError::DeserializationFailure)?;
+                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
                 let finished = json
                     .get(FINISHED)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                    .ok_or(ThundersError::DeserializationFailure)?;
 
                 let data = if let Some(value) = json.get(DATA) {
                     serde_json::to_vec(value).expect("Should always be deserializable")
@@ -308,17 +307,17 @@ impl<'a> Deserialize<Json> for OutputMessage<'a> {
                     type_: Cow::Owned(
                         type_
                             .as_str()
-                            .ok_or(ThundersServerError::DeserializationFailure)?
+                            .ok_or(ThundersError::DeserializationFailure)?
                             .to_string(),
                     ),
                     id: Cow::Owned(
                         id.as_str()
-                            .ok_or(ThundersServerError::DeserializationFailure)?
+                            .ok_or(ThundersError::DeserializationFailure)?
                             .to_string(),
                     ),
                     finished: finished
                         .as_bool()
-                        .ok_or(ThundersServerError::DeserializationFailure)?,
+                        .ok_or(ThundersError::DeserializationFailure)?,
                     data,
                 })
             }
@@ -326,20 +325,17 @@ impl<'a> Deserialize<Json> for OutputMessage<'a> {
             GENERIC_ERROR => {
                 let description = json
                     .get(DESCRIPTION)
-                    .ok_or(ThundersServerError::DeserializationFailure)?;
+                    .ok_or(ThundersError::DeserializationFailure)?;
                 Ok(OutputMessage::GenericError {
                     description: Cow::Owned(
                         description
                             .as_str()
-                            .ok_or(ThundersServerError::DeserializationFailure)?
+                            .ok_or(ThundersError::DeserializationFailure)?
                             .to_string(),
                     ),
                 })
             }
-            &_ => Err(ThundersServerError::InvalidInput),
+            &_ => Err(ThundersError::DeserializationFailure),
         }
     }
 }
-
-// TODO: Add implementation from ThundersServerError to OuputMessage using generic error or specific to have only one side where is located all possible variants sent to clients.
-// TODO: Also add for DiffNotification

@@ -4,16 +4,20 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+
 use thunders::{
-    ThundersServer,
-    client::{GameState, ThundersClientBuilder, WebSocketClientProtocol},
-    core::{
+    api::{
+        error::ThundersError,
+        schema::{Deserialize, Serialize, json::Json},
+    },
+    client::{ThundersClientBuilder, protocol::ws::WebSocketClientProtocol, state::GameState},
+    server::{
+        ThundersServer,
         context::PlayerContext,
         hooks::{Diff, GameHooks},
+        protocol::ws::WebSocketProtocol,
+        runtime::sync::{Settings, SyncRuntime},
     },
-    protocol::{ThundersServerError, ws::WebSocketProtocol},
-    runtime::sync::{Settings, SyncRuntime},
-    schema::{Deserialize, Serialize, json::Json},
 };
 
 #[tokio::main]
@@ -191,11 +195,11 @@ pub enum ChatAction {
 }
 
 impl Deserialize<Json> for ChatAction {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersServerError> {
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
         if let Ok(serialized) = serde_json::from_slice(&value) {
             Ok(serialized)
         } else {
-            Err(ThundersServerError::DeserializationFailure)
+            Err(ThundersError::DeserializationFailure)
         }
     }
 }
@@ -227,11 +231,11 @@ impl Serialize<Json> for ChatDiff {
 }
 
 impl Deserialize<Json> for ChatDiff {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersServerError> {
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
         if let Ok(serialized) = serde_json::from_slice(&value) {
             Ok(serialized)
         } else {
-            Err(ThundersServerError::DeserializationFailure)
+            Err(ThundersError::DeserializationFailure)
         }
     }
 }

@@ -1,17 +1,20 @@
-use crate::{
-    ThundersServerResult,
-    core::context::PlayerContext,
-    runtime::GameRuntimeAnyHandle,
-    schema::{Deserialize, Schema, Serialize},
-};
 use std::{
     borrow::Cow,
     collections::HashMap,
-    error::Error,
-    fmt::Display,
     sync::{Arc, RwLock},
 };
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+
+use crate::{
+    api::{
+        message::{InputMessage, OutputMessage},
+        schema::{Deserialize, Schema, Serialize},
+    },
+    server::{
+        ThundersServerResult, context::PlayerContext, error::ThundersServerError,
+        runtime::GameRuntimeAnyHandle,
+    },
+};
 
 pub mod ws;
 
@@ -179,73 +182,3 @@ impl SessionManager {
         }
     }
 }
-
-// Change io Error to custom Error type
-pub enum InputMessage {
-    Connect {
-        correlation_id: String,
-        id: u64,
-    },
-    Create {
-        type_: String,
-        id: String,
-        options: Option<Vec<u8>>,
-    },
-    Join {
-        type_: String,
-        id: String,
-    },
-    Action {
-        type_: String,
-        id: String,
-        data: Vec<u8>,
-    },
-}
-
-pub enum OutputMessage<'a> {
-    Connect {
-        correlation_id: Cow<'a, str>,
-        success: bool,
-    },
-
-    Diff {
-        type_: Cow<'static, str>,
-        id: Cow<'a, str>,
-        finished: bool,
-        data: Vec<u8>,
-    },
-    GenericError {
-        description: Cow<'static, str>,
-    },
-}
-
-impl<'a> Into<OutputMessage<'a>> for ThundersServerError {
-    fn into(self) -> OutputMessage<'a> {
-        let description = match self {
-            _ => "Generic error, please provide more details",
-        };
-        OutputMessage::GenericError {
-            description: Cow::Borrowed(description),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum ThundersServerError {
-    StartFailure,
-    MessageNotConnected,
-    RoomNotFound,
-    RoomAlreadyCreated,
-    RoomTypeNotFound,
-    ConnectionFailure,
-    InvalidInput,
-    DeserializationFailure,
-}
-
-impl Display for ThundersServerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
-    }
-}
-
-impl Error for ThundersServerError {}

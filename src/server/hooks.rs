@@ -2,7 +2,7 @@
 
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
-use crate::{core::context::PlayerContext, protocol::OutputMessage};
+use crate::{api::message::OutputMessage, server::context::PlayerContext};
 
 pub trait GameHooks: Send + 'static {
     type Delta: Send;

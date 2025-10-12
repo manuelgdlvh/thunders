@@ -8,12 +8,16 @@ use tokio_tungstenite::{
 };
 
 use crate::{
-    ThundersServerResult,
-    protocol::{
-        self, InputMessage, NetworkProtocol, OutputMessage, SessionManager, ThundersServerError,
+    api::{
+        message::{InputMessage, OutputMessage},
+        schema::{Deserialize, Schema, SchemaType, Serialize},
     },
-    runtime::GameRuntimeAnyHandle,
-    schema::{Deserialize, Schema, SchemaType, Serialize},
+    server::{
+        ThundersServerResult,
+        error::ThundersServerError,
+        protocol::{NetworkProtocol, SessionManager, connect, disconnect, process_message},
+        runtime::GameRuntimeAnyHandle,
+    },
 };
 
 pub struct WebSocketProtocol {
@@ -29,8 +33,6 @@ impl WebSocketProtocol {
         }
     }
 }
-
-// Abstract all shareable behavior of message processing
 
 impl NetworkProtocol for WebSocketProtocol {
     async fn run<S: Schema>(
@@ -60,7 +62,7 @@ impl NetworkProtocol for WebSocketProtocol {
 
                     if let Some(Ok(msg)) = read.next().await {
                         let raw_message: Vec<u8> = message_into_bytes(msg);
-                        match protocol::connect(raw_message, session_manager.as_ref()) {
+                        match connect(raw_message, session_manager.as_ref()) {
                             Ok((cxt, mut receiver)) => {
                                 player_cxt = cxt;
                                 tokio::spawn(async move {
@@ -103,7 +105,7 @@ impl NetworkProtocol for WebSocketProtocol {
                     while let Some(Ok(msg)) = read.next().await {
                         let raw_message: Vec<u8> = message_into_bytes(msg);
 
-                        protocol::process_message(
+                        process_message(
                             raw_message,
                             &player_cxt,
                             session_manager.as_ref(),
@@ -111,7 +113,7 @@ impl NetworkProtocol for WebSocketProtocol {
                         );
                     }
 
-                    protocol::disconnect(player_cxt.id(), session_manager.as_ref(), handlers);
+                    disconnect(player_cxt.id(), session_manager.as_ref(), handlers);
                 });
             } else {
                 // Check tcp stream closed error

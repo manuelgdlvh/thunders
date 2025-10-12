@@ -7,13 +7,16 @@ use std::{
 };
 
 use crate::{
-    core::{
+    api::{
+        message::OutputMessage,
+        schema::{Deserialize, Schema, Serialize},
+    },
+    server::{
         context::PlayerContext,
         hooks::{Diff, DiffNotification, Event, GameHooks},
+        protocol::SessionManager,
+        runtime::{GameHandle, GameRuntime},
     },
-    protocol::{OutputMessage, SessionManager},
-    runtime::{GameHandle, GameRuntime},
-    schema::{Deserialize, Schema, Serialize},
 };
 
 pub struct SyncRuntime {
