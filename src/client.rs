@@ -4,6 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::client::reply::Reply;
 use crate::{
     api::{
         message::{InputMessage, OutputMessage},
@@ -18,6 +19,7 @@ use crate::{
 
 pub mod error;
 pub mod protocol;
+mod reply;
 pub mod state;
 
 pub struct ThundersClientBuilder<P, S>
@@ -85,8 +87,8 @@ impl<S: Schema + 'static> ThundersClient<S> {
 
         if let Ok(reply) = awaitable.await {
             match reply {
-                reply_maybe::Reply::Timeout => Err(ThundersClientError::NoResponse),
-                reply_maybe::Reply::Err(err) => Err(err),
+                Reply::Timeout => Err(ThundersClientError::NoResponse),
+                Reply::Err(err) => Err(err),
                 _ => Ok(()),
             }
         } else {

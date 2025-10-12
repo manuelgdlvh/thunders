@@ -1,12 +1,12 @@
 use futures::{SinkExt, StreamExt};
 use std::sync::{Arc, atomic::AtomicBool};
 
-use reply_maybe::ReplyManager;
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{Bytes, Message, client::IntoClientRequest},
 };
 
+use crate::client::reply::ReplyManager;
 use crate::{
     api::{
         message::OutputMessage,

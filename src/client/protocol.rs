@@ -1,8 +1,6 @@
 use std::sync::{Arc, atomic::AtomicBool};
 
-use reply_maybe::ReplyManager;
-use tokio::sync::mpsc::UnboundedSender;
-
+use crate::client::reply::ReplyManager;
 use crate::{
     api::{
         message::OutputMessage,
@@ -13,6 +11,7 @@ use crate::{
         state::{ActiveGames, InboundAction},
     },
 };
+use tokio::sync::mpsc::UnboundedSender;
 
 #[cfg(feature = "ws")]
 pub mod ws;
