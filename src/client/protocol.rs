@@ -14,6 +14,7 @@ use crate::{
     },
 };
 
+#[cfg(feature = "ws")]
 pub mod ws;
 
 pub struct ClientProtocolHandle {

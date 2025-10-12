@@ -1,5 +1,6 @@
 use crate::api::error::ThundersError;
 
+#[cfg(feature = "json")]
 pub mod json;
 
 pub trait Schema {

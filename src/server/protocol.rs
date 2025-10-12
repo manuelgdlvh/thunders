@@ -16,9 +16,9 @@ use crate::{
     },
 };
 
+#[cfg(feature = "ws")]
 pub mod ws;
 
-// Abstract to receive deserializer to use whatever serialization schema wanted. Provide default implementation for json. Also new protocols could be implemented
 pub trait NetworkProtocol {
     fn run<S: Schema>(
         self,
