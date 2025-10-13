@@ -107,12 +107,18 @@ impl ClientProtocol for WebSocketClientProtocol {
                                                     }
                                                }
                                               OutputMessage::Diff{type_, id, finished, data} => {
-                                                   if let Err(err) = active_games.route_message(type_.as_ref(), id.as_ref(), data){
+
+
+                                                  if finished {
+                                                      if let Ok(room) = active_games.remove(type_.as_ref(), id.as_ref()) {
+                                                          room.on_finished();
+                                                      }
+                                                 } else if let Err(err) = active_games.route_message(type_.as_ref(), id.as_ref(), data){
                                                         println!("{:?}", err);
                                                   }
                                                }
                                                OutputMessage::GenericError {description} => {
-                                                   println!("{}", description);
+                                                   println!("CLIENT recevied error. {}", description);
                                                }
                                         }
                             } else {

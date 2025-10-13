@@ -27,3 +27,11 @@ where
 {
     fn serialize(self) -> Vec<u8>;
 }
+
+pub trait BorrowedSerialize<S>
+where
+    S: Schema,
+    Self: Sized,
+{
+    fn serialize(&self) -> Vec<u8>;
+}

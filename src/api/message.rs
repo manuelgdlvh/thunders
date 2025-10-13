@@ -17,8 +17,8 @@ pub enum InputMessage<'a> {
         id: Cow<'a, str>,
     },
     Action {
-        type_: String,
-        id: String,
+        type_: Cow<'static, str>,
+        id: Cow<'a, str>,
         data: Vec<u8>,
     },
 }

@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::api::{
     error::ThundersError,
     message::{InputMessage, OutputMessage},
-    schema::{Deserialize, Schema, SchemaType, Serialize},
+    schema::{BorrowedSerialize, Deserialize, Schema, SchemaType, Serialize},
 };
 
 #[derive(Default)]
@@ -23,6 +23,15 @@ where
 {
     fn serialize(self) -> Vec<u8> {
         serde_json::to_vec(&self).expect("Should always be serializable")
+    }
+}
+
+impl<T> BorrowedSerialize<Json> for T
+where
+    T: serde::Serialize,
+{
+    fn serialize(&self) -> Vec<u8> {
+        serde_json::to_vec(self).expect("Should always be serializable")
     }
 }
 
@@ -215,14 +224,17 @@ impl Deserialize<Json> for InputMessage<'_> {
                 .map_err(|_| ThundersError::DeserializationFailure)?;
 
                 Ok(InputMessage::Action {
-                    type_: type_
-                        .as_str()
-                        .ok_or(ThundersError::DeserializationFailure)?
-                        .to_string(),
-                    id: id
-                        .as_str()
-                        .ok_or(ThundersError::DeserializationFailure)?
-                        .to_string(),
+                    type_: Cow::Owned(
+                        type_
+                            .as_str()
+                            .ok_or(ThundersError::DeserializationFailure)?
+                            .to_string(),
+                    ),
+                    id: Cow::Owned(
+                        id.as_str()
+                            .ok_or(ThundersError::DeserializationFailure)?
+                            .to_string(),
+                    ),
                     data,
                 })
             }

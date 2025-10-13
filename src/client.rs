@@ -7,7 +7,7 @@ use std::{
 
 use uuid::Uuid;
 
-use crate::client::reply::Reply;
+use crate::{api::schema::BorrowedSerialize, client::reply::Reply};
 use crate::{
     api::{
         message::{InputMessage, OutputMessage},
@@ -31,7 +31,7 @@ where
     P: ClientProtocol,
 {
     protocol: P,
-    schema: S,
+    _schema: S,
     active_games: Arc<ActiveGames<S>>,
 }
 
@@ -43,7 +43,7 @@ where
     pub fn new(protocol: P, schema: S) -> Self {
         Self {
             protocol,
-            schema,
+            _schema: schema,
             active_games: Arc::new(ActiveGames::<S> {
                 current: HashMap::default(),
             }),
@@ -153,7 +153,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
         };
 
         if should_rollback {
-            self.active_games.remove(type_, id.as_str());
+            self.active_games.remove(type_, id.as_str())?;
         }
 
         result
@@ -197,21 +197,28 @@ impl<S: Schema + 'static> ThundersClient<S> {
         };
 
         if should_rollback {
-            self.active_games.remove(type_, id.as_str());
+            self.active_games.remove(type_, id.as_str())?;
         }
 
         result
     }
 
-    pub fn action<G: GameState + 'static>(&self, type_: &'static str, id: String, action: G::Action)
+    pub fn action<G: GameState + 'static>(
+        &self,
+        type_: &'static str,
+        id: &str,
+        action: G::Action,
+    ) -> Result<(), ThundersClientError>
     where
-        G::Action: Serialize<S>,
+        G::Action: BorrowedSerialize<S>,
     {
         self.try_send(InputMessage::Action {
-            type_: type_.to_string(),
-            id,
+            type_: Cow::Borrowed(type_),
+            id: Cow::Borrowed(id),
             data: action.serialize(),
         });
+
+        self.active_games.action::<G>(type_, id, action)
     }
 
     fn try_send(&self, message: InputMessage) {

@@ -56,20 +56,27 @@ pub async fn main() {
 
     let mut num_messages = 0;
     loop {
-        client_1.action::<ChatClient>(
+        if let Err(err) = client_1.action::<ChatClient>(
             "lobby_chat",
-            "Chat_1".to_string(),
+            "Chat_1",
             ChatAction::IncomingMessage(format!("#{num_messages} message from client_1")),
-        );
-        client_2.action::<ChatClient>(
+        ) {
+            println!("Exiting due to: {err:?}");
+            break;
+        }
+
+        if let Err(err) = client_2.action::<ChatClient>(
             "lobby_chat",
-            "Chat_1".to_string(),
+            "Chat_1",
             ChatAction::IncomingMessage(format!("#{num_messages} message from client_2")),
-        );
+        ) {
+            println!("Exiting due to: {err:?}");
+            break;
+        }
 
         thread::sleep(Duration::from_millis(250));
         num_messages = num_messages + 1;
-        if num_messages == (4 * 60) {
+        if num_messages == (4 * 20) {
             break;
         }
     }
@@ -109,6 +116,21 @@ impl GameState for ChatClient {
     fn on_change(&mut self, change: Self::Change) {
         println!("CLIENT received Change: {:?}", change);
     }
+
+    fn on_action(&mut self, action: Self::Action) {
+        match action {
+            ChatAction::IncomingMessage(message) => {
+                self.messages.push(ChatMessage {
+                    from: 1,
+                    text: message,
+                });
+            }
+        }
+    }
+
+    fn on_finish(self) {
+        println!("CLIENT received finish signal");
+    }
 }
 
 // Server
@@ -127,7 +149,7 @@ impl GameHooks for Chat {
         Self {
             messages: vec![],
             close_at: Instant::now()
-                .checked_add(Duration::from_secs(60))
+                .checked_add(Duration::from_secs(15))
                 .expect("Add one minute should not overflow"),
         }
     }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::RwLock};
+use std::{any::Any, collections::HashMap, sync::RwLock};
 
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -15,6 +15,8 @@ pub trait GameState {
     fn build(options: &Self::Options) -> Self;
 
     fn on_change(&mut self, change: Self::Change);
+    fn on_action(&mut self, action: Self::Action);
+    fn on_finish(self);
 }
 
 pub trait GenericGameState<S>
@@ -22,12 +24,16 @@ where
     S: Schema,
 {
     fn on_change(&mut self, change: Vec<u8>) -> Result<(), ThundersClientError>;
+
+    fn on_action(&mut self, action: Box<dyn Any>) -> Result<(), ThundersClientError>;
+
+    fn on_finished(self: Box<Self>);
 }
 
 impl<S, T> GenericGameState<S> for T
 where
     S: Schema,
-    T: GameState,
+    T: GameState + 'static,
     T::Change: Deserialize<S> + std::fmt::Debug,
 {
     fn on_change(&mut self, change: Vec<u8>) -> Result<(), ThundersClientError> {
@@ -37,6 +43,18 @@ where
         } else {
             Err(ThundersClientError::UnknownMessage)
         }
+    }
+
+    fn on_action(&mut self, action: Box<dyn Any>) -> Result<(), ThundersClientError> {
+        if let Ok(action) = action.downcast::<T::Action>() {
+            self.on_action(*action);
+            Ok(())
+        } else {
+            Err(ThundersClientError::IncompatibleAction)
+        }
+    }
+    fn on_finished(self: Box<Self>) {
+        self.on_finish();
     }
 }
 
@@ -86,14 +104,35 @@ impl<S: Schema> ActiveGames<S> {
         Ok(())
     }
 
-    pub fn remove(&self, type_: &'static str, id: &str) -> Result<(), ThundersClientError> {
+    pub fn action<G: GameState + 'static>(
+        &self,
+        type_: &'static str,
+        id: &str,
+        action: G::Action,
+    ) -> Result<(), ThundersClientError> {
         self.current
             .get(type_)
             .ok_or(ThundersClientError::RoomTypeNotFound)?
             .write()
             .expect("Should always get write lock successfully")
-            .remove(id);
-        Ok(())
+            .get_mut(id)
+            .ok_or(ThundersClientError::RoomNotFound)?
+            .on_action(Box::new(action) as Box<dyn Any>)
+    }
+
+    pub fn remove(
+        &self,
+        type_: &str,
+        id: &str,
+    ) -> Result<Box<dyn GenericGameState<S> + Send + Sync>, ThundersClientError> {
+        Ok(self
+            .current
+            .get(type_)
+            .ok_or(ThundersClientError::RoomTypeNotFound)?
+            .write()
+            .expect("Should always get write lock successfully")
+            .remove(id)
+            .ok_or(ThundersClientError::RoomNotFound)?)
     }
 }
 

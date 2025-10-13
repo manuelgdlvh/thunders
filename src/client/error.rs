@@ -6,6 +6,7 @@ pub enum ThundersClientError {
     RoomTypeNotFound,
     UnknownMessage,
     NoResponse,
+    IncompatibleAction,
     GameJoinFailure,
     GameCreationFailure,
 }

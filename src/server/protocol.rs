@@ -129,8 +129,8 @@ pub fn process_message<S: Schema>(
                 }
             }
             InputMessage::Action { type_, id, data } => {
-                if let Some(handler) = handlers.get(type_.as_str()) {
-                    let _ = handler.action(player_cxt.id(), id, data);
+                if let Some(handler) = handlers.get(type_.as_ref()) {
+                    let _ = handler.action(player_cxt.id(), id.into_owned(), data);
                 }
             }
             _ => {}
