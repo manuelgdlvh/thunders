@@ -17,12 +17,16 @@ use thunders::{
     },
 };
 
+const LOBBY_TYPE: &str = "lobby_chat";
+const LOBBY_ID: &str = "Chat_1";
+const IP_ADDRESS: &str = "127.0.0.1";
+
 #[tokio::main]
 pub async fn main() {
     tokio::spawn(async move {
-        ThundersServer::new(WebSocketProtocol::new("127.0.0.1", 8080), Json::default())
+        ThundersServer::new(WebSocketProtocol::new(IP_ADDRESS, 8080), Json::default())
             .register::<SyncRuntime, Chat>(
-                "lobby_chat",
+                LOBBY_TYPE,
                 Settings {
                     max_action_await_millis: 2000,
                     tick_interval_millis: 100,
@@ -35,8 +39,8 @@ pub async fn main() {
     let client_1 = spawn_client(1).await;
     if let Err(err) = client_1
         .create::<ChatClient>(
-            "lobby_chat",
-            "Chat_1".to_string(),
+            LOBBY_TYPE,
+            LOBBY_ID.to_string(),
             Default::default(),
             Duration::from_secs(5),
         )
@@ -48,7 +52,7 @@ pub async fn main() {
     let client_2 = spawn_client(2).await;
 
     if let Err(err) = client_2
-        .join::<ChatClient>("lobby_chat", "Chat_1".to_string(), Duration::from_secs(5))
+        .join::<ChatClient>(LOBBY_TYPE, LOBBY_ID.to_string(), Duration::from_secs(5))
         .await
     {
         panic!("{:?}", err);
@@ -57,8 +61,8 @@ pub async fn main() {
     let mut num_messages = 0;
     loop {
         if let Err(err) = client_1.action::<ChatClient>(
-            "lobby_chat",
-            "Chat_1",
+            LOBBY_TYPE,
+            LOBBY_ID,
             ChatAction::IncomingMessage(format!("#{num_messages} message from client_1")),
         ) {
             println!("Exiting due to: {err:?}");
@@ -66,8 +70,8 @@ pub async fn main() {
         }
 
         if let Err(err) = client_2.action::<ChatClient>(
-            "lobby_chat",
-            "Chat_1",
+            LOBBY_TYPE,
+            LOBBY_ID,
             ChatAction::IncomingMessage(format!("#{num_messages} message from client_2")),
         ) {
             println!("Exiting due to: {err:?}");
@@ -84,10 +88,10 @@ pub async fn main() {
 
 async fn spawn_client(id: u64) -> thunders::client::ThundersClient<Json> {
     let mut client = ThundersClientBuilder::new(
-        WebSocketClientProtocol::new("127.0.0.1".to_string(), 8080),
+        WebSocketClientProtocol::new(IP_ADDRESS.to_string(), 8080),
         Json::default(),
     )
-    .register("lobby_chat")
+    .register(LOBBY_TYPE)
     .build()
     .await
     .expect("Should initialize client successfully");
