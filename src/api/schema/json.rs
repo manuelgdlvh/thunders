@@ -35,57 +35,77 @@ where
     }
 }
 
-impl Serialize<Json> for InputMessage {
+impl Serialize<Json> for InputMessage<'_> {
     fn serialize(self) -> Vec<u8> {
         match self {
             Self::Connect { correlation_id, id } => serde_json::json!({
                 "method": "connect",
                 "correlation_id": correlation_id,
                 "id": id
-            })
-            .to_string()
-            .into_bytes(),
-            Self::Create { type_, id, .. } => serde_json::json!({
-                "method": "create",
-                "type": type_,
-                "id": id
-            })
-            .to_string()
-            .into_bytes(),
-            Self::Join { type_, id } => serde_json::json!({
-                "method": "join",
-                "type": type_,
-                "id": id
-            })
-            .to_string()
-            .into_bytes(),
-
-            Self::Action {
+            }),
+            Self::Create {
+                correlation_id,
                 type_,
                 id,
-                mut data,
+                options,
             } => {
-                let json = format!(
-                    r#"
-            {{
-            "method": "action",
-            "type" : "{}",
-            "id": "{}",
-            "data":               
-            "#,
-                    type_, id
-                );
+                let mut json_node = serde_json::json!({
+                    "method": "create",
+                    "correlation_id": correlation_id,
+                    "type": type_,
+                    "id": id
+                });
 
-                let mut raw_message = json.into_bytes();
-                raw_message.append(&mut data);
-                raw_message.push(b'}');
-                raw_message
+                if let Some(options) = options {
+                    json_node
+                        .as_object_mut()
+                        .expect("Should always be a object")
+                        .insert(
+                            OPTIONS.to_string(),
+                            serde_json::from_slice::<Value>(options.as_slice())
+                                .expect("Should always be serializable"),
+                        );
+                }
+
+                json_node
+            }
+            Self::Join {
+                correlation_id,
+                type_,
+                id,
+            } => serde_json::json!({
+                "method": "join",
+                "type": type_,
+                "correlation_id": correlation_id,
+                "id": id
+            }),
+            Self::Action { type_, id, data } => {
+                let mut json_node = serde_json::json!({
+                    "method": "action",
+                    "type": type_,
+                    "id": id
+                });
+
+                if !data.is_empty() {
+                    json_node
+                        .as_object_mut()
+                        .expect("Should always be a object")
+                        .insert(
+                            DATA.to_string(),
+                            serde_json::from_slice::<Value>(data.as_slice())
+                                .expect("Should always be serializable"),
+                        );
+                }
+
+                json_node
             }
         }
+        .to_string()
+        .into_bytes()
     }
 }
 
-impl Deserialize<Json> for InputMessage {
+impl Deserialize<Json> for InputMessage<'_> {
     fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
         const METHOD: &str = "method";
         const CORRELATION_ID: &str = "correlation_id";
@@ -125,9 +145,10 @@ impl Deserialize<Json> for InputMessage {
                 let type_ = json
                     .get(TYPE)
                     .ok_or(ThundersError::DeserializationFailure)?;
-
                 let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
-
+                let correlation_id = json
+                    .get(CORRELATION_ID)
+                    .ok_or(ThundersError::DeserializationFailure)?;
                 let options: Option<Vec<u8>> = json.get(OPTIONS).and_then(|node| {
                     serde_json::to_string(node)
                         .map(|json| json.into_bytes())
@@ -135,14 +156,21 @@ impl Deserialize<Json> for InputMessage {
                 });
 
                 Ok(InputMessage::Create {
-                    type_: type_
+                    correlation_id: correlation_id
                         .as_str()
                         .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
-                    id: id
-                        .as_str()
-                        .ok_or(ThundersError::DeserializationFailure)?
-                        .to_string(),
+                    type_: Cow::Owned(
+                        type_
+                            .as_str()
+                            .ok_or(ThundersError::DeserializationFailure)?
+                            .to_string(),
+                    ),
+                    id: Cow::Owned(
+                        id.as_str()
+                            .ok_or(ThundersError::DeserializationFailure)?
+                            .to_string(),
+                    ),
                     options,
                 })
             }
@@ -151,17 +179,27 @@ impl Deserialize<Json> for InputMessage {
                 let type_ = json
                     .get(TYPE)
                     .ok_or(ThundersError::DeserializationFailure)?;
-
+                let correlation_id = json
+                    .get(CORRELATION_ID)
+                    .ok_or(ThundersError::DeserializationFailure)?;
                 let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
+
                 Ok(InputMessage::Join {
-                    type_: type_
+                    correlation_id: correlation_id
                         .as_str()
                         .ok_or(ThundersError::DeserializationFailure)?
                         .to_string(),
-                    id: id
-                        .as_str()
-                        .ok_or(ThundersError::DeserializationFailure)?
-                        .to_string(),
+                    type_: Cow::Owned(
+                        type_
+                            .as_str()
+                            .ok_or(ThundersError::DeserializationFailure)?
+                            .to_string(),
+                    ),
+                    id: Cow::Owned(
+                        id.as_str()
+                            .ok_or(ThundersError::DeserializationFailure)?
+                            .to_string(),
+                    ),
                 })
             }
             ACTION => {
@@ -199,10 +237,15 @@ const METHOD: &str = "method";
 const CORRELATION_ID: &str = "correlation_id";
 
 const CONNECT: &str = "connect";
+
+const JOIN: &str = "join";
+const CREATE: &str = "create";
 const GENERIC_ERROR: &str = "generic_error";
 const DIFF: &str = "diff";
 
 const DATA: &str = "data";
+
+const OPTIONS: &str = "options";
 const FINISHED: &str = "finished";
 const TYPE: &str = "type";
 const ID: &str = "id";
@@ -220,12 +263,26 @@ impl<'a> Serialize<Json> for OutputMessage<'a> {
                 CORRELATION_ID: correlation_id,
                 SUCCESS: success
             }),
-
-            OutputMessage::GenericError { description } => serde_json::json!({
-                METHOD: GENERIC_ERROR,
-                DESCRIPTION : description
+            OutputMessage::Create {
+                correlation_id,
+                success,
+            } => serde_json::json!({
+                METHOD: CREATE,
+                CORRELATION_ID: correlation_id,
+                SUCCESS: success
             }),
-
+            OutputMessage::Join {
+                correlation_id,
+                success,
+            } => serde_json::json!({
+                METHOD: JOIN,
+                CORRELATION_ID: correlation_id,
+                SUCCESS: success
+            }),
+            OutputMessage::GenericError { description } => serde_json::json!({
+                 METHOD: GENERIC_ERROR,
+                 DESCRIPTION : description
+            }),
             OutputMessage::Diff {
                 type_,
                 id,
@@ -278,6 +335,44 @@ impl<'a> Deserialize<Json> for OutputMessage<'a> {
                     .get(CORRELATION_ID)
                     .ok_or(ThundersError::DeserializationFailure)?;
                 Ok(OutputMessage::Connect {
+                    correlation_id: Cow::Owned(
+                        correlation_id
+                            .as_str()
+                            .ok_or(ThundersError::DeserializationFailure)?
+                            .to_string(),
+                    ),
+                    success: success
+                        .as_bool()
+                        .ok_or(ThundersError::DeserializationFailure)?,
+                })
+            }
+            JOIN => {
+                let success = json
+                    .get(SUCCESS)
+                    .ok_or(ThundersError::DeserializationFailure)?;
+                let correlation_id = json
+                    .get(CORRELATION_ID)
+                    .ok_or(ThundersError::DeserializationFailure)?;
+                Ok(OutputMessage::Join {
+                    correlation_id: Cow::Owned(
+                        correlation_id
+                            .as_str()
+                            .ok_or(ThundersError::DeserializationFailure)?
+                            .to_string(),
+                    ),
+                    success: success
+                        .as_bool()
+                        .ok_or(ThundersError::DeserializationFailure)?,
+                })
+            }
+            CREATE => {
+                let success = json
+                    .get(SUCCESS)
+                    .ok_or(ThundersError::DeserializationFailure)?;
+                let correlation_id = json
+                    .get(CORRELATION_ID)
+                    .ok_or(ThundersError::DeserializationFailure)?;
+                Ok(OutputMessage::Create {
                     correlation_id: Cow::Owned(
                         correlation_id
                             .as_str()

@@ -1,8 +1,11 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     sync::{Arc, RwLock},
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+use uuid::Uuid;
 
 use crate::client::reply::Reply;
 use crate::{
@@ -49,7 +52,7 @@ where
 
     pub fn register(mut self, type_: &'static str) -> Self {
         Arc::get_mut(&mut self.active_games)
-            .expect("")
+            .expect("Should always have unique owner")
             .current
             .insert(type_, RwLock::new(HashMap::new()));
         self
@@ -74,18 +77,23 @@ pub struct ThundersClient<S: Schema> {
 }
 
 impl<S: Schema + 'static> ThundersClient<S> {
-    // Add awaitable callback with timeout to know if successfully created or joined
-
-    pub async fn connect(&mut self, id: u64) -> Result<(), ThundersClientError> {
-        let correlation_id = format!("{:?}", Instant::now());
-        let awaitable = self
+    pub async fn connect(
+        &mut self,
+        player_id: u64,
+        expires_in: Duration,
+    ) -> Result<(), ThundersClientError> {
+        let correlation_id = Uuid::new_v4().to_string();
+        let reply = self
             .p_handle
             .reply_manager
-            .register(correlation_id.clone(), Duration::from_secs(5));
+            .register(correlation_id.clone(), expires_in);
 
-        self.try_send(InputMessage::Connect { correlation_id, id });
+        self.try_send(InputMessage::Connect {
+            correlation_id,
+            id: player_id,
+        });
 
-        if let Ok(reply) = awaitable.await {
+        if let Ok(reply) = reply.await {
             match reply {
                 Reply::Timeout => Err(ThundersClientError::NoResponse),
                 Reply::Err(err) => Err(err),
@@ -100,32 +108,99 @@ impl<S: Schema + 'static> ThundersClient<S> {
         &self,
         type_: &'static str,
         id: String,
-        game: G,
-    ) where
+        options: G::Options,
+        expires_in: Duration,
+    ) -> Result<(), ThundersClientError>
+    where
         G::Change: Deserialize<S>,
+        G::Options: Serialize<S>,
     {
-        let _ = self.active_games.create(type_, id.clone(), game);
+        let game = G::build(&options);
+        self.active_games.create(type_, id.clone(), game)?;
+
+        let correlation_id = Uuid::new_v4().to_string();
+        let reply = self
+            .p_handle
+            .reply_manager
+            .register(correlation_id.clone(), expires_in);
+
+        let options_serialized = options.serialize();
+        let options = if options_serialized.len() > 0 {
+            Some(options_serialized)
+        } else {
+            None
+        };
+
         self.try_send(InputMessage::Create {
-            type_: type_.to_string(),
-            id,
-            options: None,
+            correlation_id,
+            type_: Cow::Borrowed(type_),
+            id: Cow::Borrowed(id.as_str()),
+            options,
         });
+
+        let mut should_rollback = true;
+        let result = if let Ok(reply) = reply.await {
+            match reply {
+                Reply::Timeout => Err(ThundersClientError::NoResponse),
+                Reply::Err(err) => Err(err),
+                _ => {
+                    should_rollback = false;
+                    Ok(())
+                }
+            }
+        } else {
+            Err(ThundersClientError::NoResponse)
+        };
+
+        if should_rollback {
+            self.active_games.remove(type_, id.as_str());
+        }
+
+        result
     }
 
-    pub fn join<G: GameState + Send + Sync + 'static>(
+    pub async fn join<G: GameState + Send + Sync + 'static>(
         &self,
         type_: &'static str,
         id: String,
-        game: G,
-    ) where
+        expires_in: Duration,
+    ) -> Result<(), ThundersClientError>
+    where
         G::Change: Deserialize<S>,
     {
-        // TODO: Change this
-        let _ = self.active_games.create(type_, id.clone(), game);
+        let game = G::build(&G::Options::default());
+        self.active_games.create(type_, id.clone(), game)?;
+
+        let correlation_id = Uuid::new_v4().to_string();
+        let reply = self
+            .p_handle
+            .reply_manager
+            .register(correlation_id.clone(), expires_in);
+
         self.try_send(InputMessage::Join {
-            type_: type_.to_string(),
-            id,
+            correlation_id,
+            type_: Cow::Borrowed(type_),
+            id: Cow::Borrowed(id.as_str()),
         });
+        let mut should_rollback = true;
+        let result = if let Ok(reply) = reply.await {
+            match reply {
+                Reply::Timeout => Err(ThundersClientError::NoResponse),
+                Reply::Err(err) => Err(err),
+                _ => {
+                    should_rollback = false;
+                    Ok(())
+                }
+            }
+        } else {
+            Err(ThundersClientError::NoResponse)
+        };
+
+        if should_rollback {
+            self.active_games.remove(type_, id.as_str());
+        }
+
+        result
     }
 
     pub fn action<G: GameState + 'static>(&self, type_: &'static str, id: String, action: G::Action)

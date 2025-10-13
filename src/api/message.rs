@@ -1,18 +1,20 @@
 use std::borrow::Cow;
 
-pub enum InputMessage {
+pub enum InputMessage<'a> {
     Connect {
         correlation_id: String,
         id: u64,
     },
     Create {
-        type_: String,
-        id: String,
+        correlation_id: String,
+        type_: Cow<'static, str>,
+        id: Cow<'a, str>,
         options: Option<Vec<u8>>,
     },
     Join {
-        type_: String,
-        id: String,
+        correlation_id: String,
+        type_: Cow<'static, str>,
+        id: Cow<'a, str>,
     },
     Action {
         type_: String,
@@ -26,7 +28,14 @@ pub enum OutputMessage<'a> {
         correlation_id: Cow<'a, str>,
         success: bool,
     },
-
+    Create {
+        correlation_id: Cow<'a, str>,
+        success: bool,
+    },
+    Join {
+        correlation_id: Cow<'a, str>,
+        success: bool,
+    },
     Diff {
         type_: Cow<'static, str>,
         id: Cow<'a, str>,

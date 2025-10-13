@@ -41,7 +41,7 @@ impl NetworkProtocol for WebSocketProtocol {
         handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
     ) -> ThundersServerResult
     where
-        InputMessage: Deserialize<S>,
+        for<'a> InputMessage<'a>: Deserialize<S>,
     {
         let listener = TcpListener::bind(format!("{}:{}", self.addr, self.port).as_str())
             .await

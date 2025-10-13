@@ -46,7 +46,6 @@ where
 {
     replies_registry: Mutex<HashMap<Id, Sender<Reply<R, E>>>>,
     registered_timeouts: RwLock<BinaryHeap<RegisteredTimeout<Id>>>,
-    clean_running: AtomicBool,
     // TODO: improve this using custom wakers
     tick_interval: tokio::time::Duration,
 }
@@ -59,7 +58,6 @@ where
         Self {
             replies_registry: Mutex::new(HashMap::new()),
             registered_timeouts: RwLock::new(BinaryHeap::new()),
-            clean_running: AtomicBool::new(false),
             tick_interval,
         }
     }
@@ -97,16 +95,7 @@ where
         }
     }
 
-    pub async fn vacuum(&self) {
-        if self
-            .clean_running
-            .swap(true, std::sync::atomic::Ordering::AcqRel)
-        {
-            return;
-        }
-
-        tokio::time::sleep(self.tick_interval).await;
-
+    pub fn vacuum(&self) {
         let now = Instant::now();
         loop {
             if let Some(registered_timeout) = self
@@ -138,8 +127,5 @@ where
                 let _ = pending_reply.send(Reply::Timeout);
             }
         }
-
-        self.clean_running
-            .store(false, std::sync::atomic::Ordering::Release);
     }
 }

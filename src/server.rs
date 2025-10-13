@@ -67,7 +67,7 @@ where
 
     pub async fn run(self) -> ThundersServerResult
     where
-        InputMessage: Deserialize<S>,
+        for<'a> InputMessage<'a>: Deserialize<S>,
     {
         let handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>> =
             Box::leak(Box::new(self.handlers));

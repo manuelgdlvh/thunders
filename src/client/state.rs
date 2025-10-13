@@ -10,6 +10,10 @@ use crate::{
 pub trait GameState {
     type Change: std::fmt::Debug;
     type Action;
+    type Options: Default;
+
+    fn build(options: &Self::Options) -> Self;
+
     fn on_change(&mut self, change: Self::Change);
 }
 
@@ -79,6 +83,16 @@ impl<S: Schema> ActiveGames<S> {
                 Box::new(game) as Box<dyn GenericGameState<S> + Send + Sync>,
             );
 
+        Ok(())
+    }
+
+    pub fn remove(&self, type_: &'static str, id: &str) -> Result<(), ThundersClientError> {
+        self.current
+            .get(type_)
+            .ok_or(ThundersClientError::RoomTypeNotFound)?
+            .write()
+            .expect("Should always get write lock successfully")
+            .remove(id);
         Ok(())
     }
 }

@@ -33,20 +33,26 @@ pub async fn main() {
     });
 
     let client_1 = spawn_client(1).await;
-    client_1
-        .create(
+    if let Err(err) = client_1
+        .create::<ChatClient>(
             "lobby_chat",
             "Chat_1".to_string(),
-            ChatClient { messages: vec![] },
+            Default::default(),
+            Duration::from_secs(5),
         )
-        .await;
+        .await
+    {
+        panic!("{:?}", err);
+    }
 
     let client_2 = spawn_client(2).await;
-    client_2.join(
-        "lobby_chat",
-        "Chat_1".to_string(),
-        ChatClient { messages: vec![] },
-    );
+
+    if let Err(err) = client_2
+        .join::<ChatClient>("lobby_chat", "Chat_1".to_string(), Duration::from_secs(5))
+        .await
+    {
+        panic!("{:?}", err);
+    }
 
     let mut num_messages = 0;
     loop {
@@ -79,7 +85,7 @@ async fn spawn_client(id: u64) -> thunders::client::ThundersClient<Json> {
     .await
     .expect("Should initialize client successfully");
 
-    if let Err(err) = client.connect(id).await {
+    if let Err(err) = client.connect(id, Duration::from_secs(5)).await {
         panic!("{:?}", err);
     }
     client
@@ -94,6 +100,11 @@ pub struct ChatClient {
 impl GameState for ChatClient {
     type Action = ChatAction;
     type Change = ChatDiff;
+    type Options = ();
+
+    fn build(_options: &Self::Options) -> Self {
+        Self { messages: vec![] }
+    }
 
     fn on_change(&mut self, change: Self::Change) {
         println!("CLIENT received Change: {:?}", change);

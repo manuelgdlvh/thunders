@@ -26,7 +26,7 @@ pub trait NetworkProtocol {
         handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
     ) -> impl Future<Output = ThundersServerResult>
     where
-        InputMessage: Deserialize<S>;
+        for<'a> InputMessage<'a>: Deserialize<S>;
 }
 
 pub fn disconnect(
@@ -51,7 +51,7 @@ pub fn connect<S: Schema>(
     session_manager: &SessionManager,
 ) -> Result<(Arc<PlayerContext>, UnboundedReceiver<Vec<u8>>), ThundersServerError>
 where
-    InputMessage: Deserialize<S>,
+    for<'a> InputMessage<'a>: Deserialize<S>,
 {
     if let Ok(message) = <InputMessage as Deserialize<S>>::deserialize(raw_message) {
         match message {
@@ -72,22 +72,58 @@ pub fn process_message<S: Schema>(
     session_manager: &SessionManager,
     handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
 ) where
-    InputMessage: Deserialize<S>,
+    for<'a> InputMessage<'a>: Deserialize<S>,
 {
     if let Ok(message) = <InputMessage as Deserialize<S>>::deserialize(raw_message) {
         match message {
-            InputMessage::Create { type_, id, options } => {
-                if let Some(handler) = handlers.get(type_.as_str()) {
-                    session_manager.subscribe(player_cxt.id(), type_, id.clone());
-                    handler.register(Arc::clone(&player_cxt), id, options);
+            InputMessage::Create {
+                correlation_id,
+                type_,
+                id,
+                options,
+            } => {
+                if let Some(handler) = handlers.get(type_.as_ref()) {
+                    session_manager.subscribe(
+                        player_cxt.id(),
+                        type_.into_owned(),
+                        id.as_ref().to_string(),
+                    );
+
+                    // TODO: Check result to send success or not
+                    handler.register(Arc::clone(&player_cxt), id.into_owned(), options);
+
+                    session_manager.send(
+                        player_cxt.id(),
+                        OutputMessage::Create {
+                            correlation_id: Cow::Owned(correlation_id),
+                            success: true,
+                        },
+                    );
                 } else {
+                    // TODO: Add correlation id to these errors
                     session_manager.send(player_cxt.id(), ThundersServerError::RoomTypeNotFound);
                 }
             }
-            InputMessage::Join { type_, id } => {
-                if let Some(handler) = handlers.get(type_.as_str()) {
-                    session_manager.subscribe(player_cxt.id(), type_, id.clone());
-                    handler.join(Arc::clone(&player_cxt), id);
+            InputMessage::Join {
+                correlation_id,
+                type_,
+                id,
+            } => {
+                if let Some(handler) = handlers.get(type_.as_ref()) {
+                    session_manager.subscribe(
+                        player_cxt.id(),
+                        type_.into_owned(),
+                        id.as_ref().to_string(),
+                    );
+                    handler.join(Arc::clone(&player_cxt), id.into_owned());
+
+                    session_manager.send(
+                        player_cxt.id(),
+                        OutputMessage::Join {
+                            correlation_id: Cow::Owned(correlation_id),
+                            success: true,
+                        },
+                    );
                 } else {
                     session_manager.send(player_cxt.id(), ThundersServerError::RoomTypeNotFound);
                 }

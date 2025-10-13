@@ -1,4 +1,3 @@
-
 #[derive(Debug)]
 pub enum ThundersClientError {
     ConnectionFailure,
@@ -7,4 +6,6 @@ pub enum ThundersClientError {
     RoomTypeNotFound,
     UnknownMessage,
     NoResponse,
+    GameJoinFailure,
+    GameCreationFailure,
 }
