@@ -6,10 +6,7 @@ use std::{
 };
 
 use thunders::{
-    api::{
-        error::ThundersError,
-        schema::{Deserialize, Serialize, json::Json},
-    },
+    api::schema::json::Json,
     client::{ThundersClientBuilder, protocol::ws::WebSocketClientProtocol, state::GameState},
     server::{
         ThundersServer,
@@ -194,22 +191,6 @@ pub enum ChatAction {
     IncomingMessage(String),
 }
 
-impl Deserialize<Json> for ChatAction {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
-        if let Ok(serialized) = serde_json::from_slice(&value) {
-            Ok(serialized)
-        } else {
-            Err(ThundersError::DeserializationFailure)
-        }
-    }
-}
-
-impl Serialize<Json> for ChatAction {
-    fn serialize(self) -> Vec<u8> {
-        serde_json::to_vec(&self).expect("Should always be serializable")
-    }
-}
-
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     from: u64,
@@ -220,22 +201,4 @@ pub struct ChatMessage {
 pub enum ChatDiff {
     MessagesAdded { messages: Vec<ChatMessage> },
     ChatClosed,
-}
-
-// TODO: Autoimplement if implement serde::DeSerialize
-
-impl Serialize<Json> for ChatDiff {
-    fn serialize(self) -> Vec<u8> {
-        serde_json::to_vec(&self).expect("Should always be serializable")
-    }
-}
-
-impl Deserialize<Json> for ChatDiff {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
-        if let Ok(serialized) = serde_json::from_slice(&value) {
-            Ok(serialized)
-        } else {
-            Err(ThundersError::DeserializationFailure)
-        }
-    }
 }

@@ -17,24 +17,26 @@ impl Schema for Json {
     }
 }
 
-impl Deserialize<Json> for () {
-    fn deserialize(_value: Vec<u8>) -> Result<Self, ThundersError> {
-        Ok(())
+impl<T> Serialize<Json> for T
+where
+    T: serde::Serialize,
+{
+    fn serialize(self) -> Vec<u8> {
+        serde_json::to_vec(&self).expect("Should always be serializable")
     }
 }
 
-impl Serialize<Json> for () {
-    fn serialize(self) -> Vec<u8> {
-        vec![]
+impl<T> Deserialize<Json> for T
+where
+    for<'de> T: serde::Deserialize<'de>,
+{
+    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
+        serde_json::from_slice(&value).map_err(|_| ThundersError::DeserializationFailure)
     }
 }
 
 impl Serialize<Json> for InputMessage {
     fn serialize(self) -> Vec<u8> {
-        const METHOD: &str = "method";
-        const CONNECT: &str = "connect";
-        const ID: &str = "id";
-
         match self {
             Self::Connect { correlation_id, id } => serde_json::json!({
                 "method": "connect",
