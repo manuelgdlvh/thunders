@@ -89,7 +89,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
             .register(correlation_id.clone(), expires_in);
 
         self.try_send(InputMessage::Connect {
-            correlation_id,
+            correlation_id: Cow::Owned(correlation_id),
             id: player_id,
         });
 
@@ -132,7 +132,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
         };
 
         self.try_send(InputMessage::Create {
-            correlation_id,
+            correlation_id: Cow::Owned(correlation_id),
             type_: Cow::Borrowed(type_),
             id: Cow::Borrowed(id.as_str()),
             options,
@@ -178,7 +178,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
             .register(correlation_id.clone(), expires_in);
 
         self.try_send(InputMessage::Join {
-            correlation_id,
+            correlation_id: Cow::Owned(correlation_id),
             type_: Cow::Borrowed(type_),
             id: Cow::Borrowed(id.as_str()),
         });

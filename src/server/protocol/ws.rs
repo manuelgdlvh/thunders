@@ -10,7 +10,7 @@ use tokio_tungstenite::{
 use crate::{
     api::{
         message::{InputMessage, OutputMessage},
-        schema::{Deserialize, Schema, SchemaType, Serialize},
+        schema::{BorrowedDeserialize, Schema, SchemaType, Serialize},
     },
     server::{
         ThundersServerResult,
@@ -41,7 +41,7 @@ impl NetworkProtocol for WebSocketProtocol {
         handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
     ) -> ThundersServerResult
     where
-        for<'a> InputMessage<'a>: Deserialize<S>,
+        for<'a> InputMessage<'a>: BorrowedDeserialize<'a, S>,
     {
         let listener = TcpListener::bind(format!("{}:{}", self.addr, self.port).as_str())
             .await

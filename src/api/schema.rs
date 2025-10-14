@@ -20,6 +20,14 @@ where
     fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError>;
 }
 
+pub trait BorrowedDeserialize<'de, S>
+where
+    S: Schema,
+    Self: Sized,
+{
+    fn deserialize(buf: &'de [u8]) -> Result<Self, ThundersError>;
+}
+
 pub trait Serialize<S>
 where
     S: Schema,

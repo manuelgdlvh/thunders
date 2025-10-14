@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     api::{
         message::InputMessage,
-        schema::{Deserialize, Schema, Serialize},
+        schema::{BorrowedDeserialize, Deserialize, Schema, Serialize},
     },
     server::{
         error::ThundersServerError,
@@ -67,7 +67,7 @@ where
 
     pub async fn run(self) -> ThundersServerResult
     where
-        for<'a> InputMessage<'a>: Deserialize<S>,
+        for<'a> InputMessage<'a>: BorrowedDeserialize<'a, S>,
     {
         let handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>> =
             Box::leak(Box::new(self.handlers));

@@ -8,7 +8,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use crate::{
     api::{
         message::{InputMessage, OutputMessage},
-        schema::{Deserialize, Schema, Serialize},
+        schema::{BorrowedDeserialize, Schema, Serialize},
     },
     server::{
         ThundersServerResult, context::PlayerContext, error::ThundersServerError,
@@ -26,7 +26,7 @@ pub trait NetworkProtocol {
         handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
     ) -> impl Future<Output = ThundersServerResult>
     where
-        for<'a> InputMessage<'a>: Deserialize<S>;
+        for<'a> InputMessage<'a>: BorrowedDeserialize<'a, S>;
 }
 
 pub fn disconnect(
@@ -51,13 +51,17 @@ pub fn connect<S: Schema>(
     session_manager: &SessionManager,
 ) -> Result<(Arc<PlayerContext>, UnboundedReceiver<Vec<u8>>), ThundersServerError>
 where
-    for<'a> InputMessage<'a>: Deserialize<S>,
+    for<'a> InputMessage<'a>: BorrowedDeserialize<'a, S>,
 {
-    if let Ok(message) = <InputMessage as Deserialize<S>>::deserialize(raw_message) {
+    let raw_message_ref = raw_message.as_slice();
+    if let Ok(message) = <InputMessage as BorrowedDeserialize<S>>::deserialize(raw_message_ref) {
         match message {
             InputMessage::Connect { correlation_id, id } => {
                 let player_cxt = Arc::new(PlayerContext::new(id));
-                Ok((player_cxt, session_manager.connect(correlation_id, id)))
+                Ok((
+                    player_cxt,
+                    session_manager.connect(correlation_id.as_ref(), id),
+                ))
             }
             _ => Err(ThundersServerError::MessageNotConnected),
         }
@@ -72,9 +76,10 @@ pub fn process_message<S: Schema>(
     session_manager: &SessionManager,
     handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
 ) where
-    for<'a> InputMessage<'a>: Deserialize<S>,
+    for<'a> InputMessage<'a>: BorrowedDeserialize<'a, S>,
 {
-    if let Ok(message) = <InputMessage as Deserialize<S>>::deserialize(raw_message) {
+    let raw_message_ref = raw_message.as_slice();
+    if let Ok(message) = <InputMessage as BorrowedDeserialize<S>>::deserialize(raw_message_ref) {
         match message {
             InputMessage::Create {
                 correlation_id,
@@ -95,7 +100,7 @@ pub fn process_message<S: Schema>(
                     session_manager.send(
                         player_cxt.id(),
                         OutputMessage::Create {
-                            correlation_id: Cow::Owned(correlation_id),
+                            correlation_id: Cow::Owned(correlation_id.into_owned()),
                             success: true,
                         },
                     );
@@ -120,7 +125,7 @@ pub fn process_message<S: Schema>(
                     session_manager.send(
                         player_cxt.id(),
                         OutputMessage::Join {
-                            correlation_id: Cow::Owned(correlation_id),
+                            correlation_id: Cow::Owned(correlation_id.into_owned()),
                             success: true,
                         },
                     );
@@ -149,12 +154,12 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
-    pub fn connect(&self, correlation_id: String, player_id: u64) -> UnboundedReceiver<Vec<u8>> {
+    pub fn connect(&self, correlation_id: &str, player_id: u64) -> UnboundedReceiver<Vec<u8>> {
         let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
         tx.send(
             OutputMessage::Connect {
-                correlation_id: Cow::Owned(correlation_id),
+                correlation_id: Cow::Borrowed(correlation_id),
                 success: true,
             }
             .serialize(),

@@ -2,22 +2,22 @@ use std::borrow::Cow;
 
 pub enum InputMessage<'a> {
     Connect {
-        correlation_id: String,
+        correlation_id: Cow<'a, str>,
         id: u64,
     },
     Create {
-        correlation_id: String,
-        type_: Cow<'static, str>,
+        correlation_id: Cow<'a, str>,
+        type_: Cow<'a, str>,
         id: Cow<'a, str>,
         options: Option<Vec<u8>>,
     },
     Join {
-        correlation_id: String,
-        type_: Cow<'static, str>,
+        correlation_id: Cow<'a, str>,
+        type_: Cow<'a, str>,
         id: Cow<'a, str>,
     },
     Action {
-        type_: Cow<'static, str>,
+        type_: Cow<'a, str>,
         id: Cow<'a, str>,
         data: Vec<u8>,
     },

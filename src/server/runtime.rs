@@ -164,6 +164,7 @@ where
     }
 
     fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), ThundersError> {
+        // TODO: Check if action can be borrowed to avoid allocation due to standarization of Deserialize to Borrowed.
         match <H::Action as Deserialize<S>>::deserialize(action) {
             Ok(action) => {
                 self.action(cxt, room_id, action);

@@ -1,11 +1,9 @@
-use std::borrow::Cow;
-
 use serde_json::Value;
 
 use crate::api::{
     error::ThundersError,
     message::{InputMessage, OutputMessage},
-    schema::{BorrowedSerialize, Deserialize, Schema, SchemaType, Serialize},
+    schema::{BorrowedDeserialize, BorrowedSerialize, Schema, SchemaType, Serialize},
 };
 
 #[derive(Default)]
@@ -35,7 +33,7 @@ where
     }
 }
 
-impl<T> Deserialize<Json> for T
+impl<T> crate::api::schema::Deserialize<Json> for T
 where
     for<'de> T: serde::Deserialize<'de>,
 {
@@ -50,7 +48,7 @@ impl Serialize<Json> for InputMessage<'_> {
             Self::Connect { correlation_id, id } => serde_json::json!({
                 "method": "connect",
                 "correlation_id": correlation_id,
-                "id": id
+                "p_id": id
             }),
             Self::Create {
                 correlation_id,
@@ -114,132 +112,141 @@ impl Serialize<Json> for InputMessage<'_> {
     }
 }
 
-impl Deserialize<Json> for InputMessage<'_> {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
-        const METHOD: &str = "method";
-        const CORRELATION_ID: &str = "correlation_id";
-        const CONNECT: &str = "connect";
-        const ID: &str = "id";
-        const CREATE: &str = "create";
-        const TYPE: &str = "type";
-        const OPTIONS: &str = "options";
-        const DATA: &str = "data";
-        const ACTION: &str = "action";
-        const JOIN: &str = "join";
+use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, Visitor};
+use std::borrow::Cow;
 
-        let json: Value = serde_json::from_slice(value.as_slice())
-            .map_err(|_| ThundersError::DeserializationFailure)?;
+impl<'de> BorrowedDeserialize<'de, Json> for InputMessage<'de>
+where
+    Json: Schema,
+{
+    fn deserialize(buf: &'de [u8]) -> Result<Self, ThundersError> {
+        let mut de = serde_json::Deserializer::from_slice(buf);
 
-        let method = json
-            .get(METHOD)
-            .ok_or(ThundersError::DeserializationFailure)?;
-        match method
-            .as_str()
-            .ok_or(ThundersError::DeserializationFailure)?
-        {
-            CONNECT => {
-                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
-                let correlation_id = json
-                    .get(CORRELATION_ID)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                Ok(InputMessage::Connect {
-                    correlation_id: correlation_id
-                        .as_str()
-                        .ok_or(ThundersError::DeserializationFailure)?
-                        .to_string(),
-                    id: id.as_u64().ok_or(ThundersError::DeserializationFailure)?,
-                })
-            }
-            CREATE => {
-                let type_ = json
-                    .get(TYPE)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
-                let correlation_id = json
-                    .get(CORRELATION_ID)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                let options: Option<Vec<u8>> = json.get(OPTIONS).and_then(|node| {
-                    serde_json::to_string(node)
-                        .map(|json| json.into_bytes())
-                        .ok()
-                });
+        struct Root;
 
-                Ok(InputMessage::Create {
-                    correlation_id: correlation_id
-                        .as_str()
-                        .ok_or(ThundersError::DeserializationFailure)?
-                        .to_string(),
-                    type_: Cow::Owned(
-                        type_
-                            .as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                    id: Cow::Owned(
-                        id.as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                    options,
-                })
+        impl<'de2> Visitor<'de2> for Root {
+            type Value = InputMessage<'de2>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("flat JSON {method, correlation_id, id, p_id, type, options?, data?}")
             }
 
-            JOIN => {
-                let type_ = json
-                    .get(TYPE)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                let correlation_id = json
-                    .get(CORRELATION_ID)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de2>,
+            {
+                enum Field {
+                    Method,
+                    Corr,
+                    Id,
+                    PId,
+                    Type,
+                    Options,
+                    Data,
+                    Unknown,
+                }
+                struct FieldSeed;
+                impl<'de2> DeserializeSeed<'de2> for FieldSeed {
+                    type Value = Field;
+                    fn deserialize<D>(self, d: D) -> Result<Self::Value, D::Error>
+                    where
+                        D: Deserializer<'de2>,
+                    {
+                        let k: Cow<'de2, str> = Cow::deserialize(d)?;
+                        Ok(match &*k {
+                            METHOD => Field::Method,
+                            CORRELATION_ID => Field::Corr,
+                            ID => Field::Id,
+                            PLAYER_ID => Field::PId,
+                            TYPE => Field::Type,
+                            OPTIONS => Field::Options,
+                            DATA => Field::Data,
+                            _ => Field::Unknown,
+                        })
+                    }
+                }
 
-                Ok(InputMessage::Join {
-                    correlation_id: correlation_id
-                        .as_str()
-                        .ok_or(ThundersError::DeserializationFailure)?
-                        .to_string(),
-                    type_: Cow::Owned(
-                        type_
-                            .as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                    id: Cow::Owned(
-                        id.as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                })
+                let mut method: Option<Cow<'de2, str>> = None;
+                let mut corr: Option<Cow<'de2, str>> = None;
+                let mut ty: Option<Cow<'de2, str>> = None;
+                let mut id: Option<Cow<'de2, str>> = None;
+                let mut p_id: Option<u64> = None;
+                let mut options_bytes: Option<Vec<u8>> = None;
+                let mut data_bytes: Option<Vec<u8>> = None;
+
+                while let Some(f) = map.next_key_seed(FieldSeed)? {
+                    match f {
+                        Field::Method => method = Some(map.next_value()?),
+                        Field::Corr => corr = Some(map.next_value()?),
+                        Field::Type => ty = Some(map.next_value()?),
+                        Field::Id => id = Some(map.next_value()?),
+                        Field::PId => p_id = Some(map.next_value()?),
+                        Field::Options => {
+                            let v: serde_json::Value = map.next_value()?;
+                            options_bytes = Some(serde_json::to_vec(&v).unwrap_or_default());
+                        }
+                        Field::Data => {
+                            let v: serde_json::Value = map.next_value()?;
+                            data_bytes = Some(serde_json::to_vec(&v).unwrap_or_default());
+                        }
+                        Field::Unknown => {
+                            let _: de::IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+
+                let method = method.ok_or_else(|| de::Error::custom("missing `method`"))?;
+                match &*method {
+                    CONNECT => {
+                        let id_num =
+                            p_id.ok_or_else(|| de::Error::custom("missing `p_id` for connect"))?;
+                        let corr =
+                            corr.ok_or_else(|| de::Error::custom("missing `correlation_id`"))?;
+                        Ok(InputMessage::Connect {
+                            correlation_id: corr,
+                            id: id_num,
+                        })
+                    }
+                    CREATE => {
+                        let corr =
+                            corr.ok_or_else(|| de::Error::custom("missing `correlation_id`"))?;
+                        let ty = ty.ok_or_else(|| de::Error::custom("missing `type`"))?;
+                        let id = id.ok_or_else(|| de::Error::custom("missing `id`"))?;
+                        Ok(InputMessage::Create {
+                            correlation_id: corr,
+                            type_: ty,
+                            id,
+                            options: options_bytes,
+                        })
+                    }
+                    JOIN => {
+                        let corr =
+                            corr.ok_or_else(|| de::Error::custom("missing `correlation_id`"))?;
+                        let ty = ty.ok_or_else(|| de::Error::custom("missing `type`"))?;
+                        let id = id.ok_or_else(|| de::Error::custom("missing `id`"))?;
+                        Ok(InputMessage::Join {
+                            correlation_id: corr,
+                            type_: ty,
+                            id,
+                        })
+                    }
+                    ACTION => {
+                        let ty = ty.ok_or_else(|| de::Error::custom("missing `type`"))?;
+                        let id = id.ok_or_else(|| de::Error::custom("missing `id`"))?;
+                        let data = data_bytes.unwrap_or_default();
+                        Ok(InputMessage::Action {
+                            type_: ty,
+                            id,
+                            data,
+                        })
+                    }
+                    _ => Err(de::Error::custom("unknown method")),
+                }
             }
-            ACTION => {
-                let type_ = json
-                    .get(TYPE)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
-
-                let data: Vec<u8> = serde_json::to_vec(
-                    json.get(DATA)
-                        .ok_or(ThundersError::DeserializationFailure)?,
-                )
-                .map_err(|_| ThundersError::DeserializationFailure)?;
-
-                Ok(InputMessage::Action {
-                    type_: Cow::Owned(
-                        type_
-                            .as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                    id: Cow::Owned(
-                        id.as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                    data,
-                })
-            }
-            &_ => Err(ThundersError::DeserializationFailure),
         }
+
+        de.deserialize_map(Root)
+            .map_err(|_| ThundersError::DeserializationFailure)
     }
 }
 
@@ -254,6 +261,7 @@ const JOIN: &str = "join";
 const CREATE: &str = "create";
 const GENERIC_ERROR: &str = "generic_error";
 const DIFF: &str = "diff";
+const ACTION: &str = "action";
 
 const DATA: &str = "data";
 
@@ -261,6 +269,8 @@ const OPTIONS: &str = "options";
 const FINISHED: &str = "finished";
 const TYPE: &str = "type";
 const ID: &str = "id";
+
+const PLAYER_ID: &str = "p_id";
 const DESCRIPTION: &str = "description";
 const SUCCESS: &str = "success";
 
@@ -327,7 +337,7 @@ impl<'a> Serialize<Json> for OutputMessage<'a> {
     }
 }
 
-impl<'a> Deserialize<Json> for OutputMessage<'a> {
+impl<'a> crate::api::schema::Deserialize<Json> for OutputMessage<'a> {
     fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
         let json: Value = serde_json::from_slice(value.as_slice())
             .map_err(|_| ThundersError::DeserializationFailure)?;
