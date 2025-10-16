@@ -23,7 +23,7 @@ pub trait GenericGameState<S>
 where
     S: Schema,
 {
-    fn on_change(&mut self, change: Vec<u8>) -> Result<(), ThundersClientError>;
+    fn on_change(&mut self, change: &[u8]) -> Result<(), ThundersClientError>;
 
     fn on_action(&mut self, action: Box<dyn Any>) -> Result<(), ThundersClientError>;
 
@@ -34,9 +34,9 @@ impl<S, T> GenericGameState<S> for T
 where
     S: Schema,
     T: GameState + 'static,
-    T::Change: Deserialize<S> + std::fmt::Debug,
+    T::Change: for<'a> Deserialize<'a, S> + std::fmt::Debug,
 {
-    fn on_change(&mut self, change: Vec<u8>) -> Result<(), ThundersClientError> {
+    fn on_change(&mut self, change: &[u8]) -> Result<(), ThundersClientError> {
         if let Ok(change) = <T::Change as Deserialize<S>>::deserialize(change) {
             self.on_change(change);
             Ok(())
@@ -68,10 +68,9 @@ impl<S: Schema> ActiveGames<S> {
         &self,
         type_: &str,
         id: &str,
-        message: Vec<u8>,
+        message: &[u8],
     ) -> Result<(), ThundersClientError> {
-        Ok(self
-            .current
+        self.current
             .get(type_)
             .ok_or(ThundersClientError::RoomTypeNotFound)?
             .write()
@@ -79,7 +78,7 @@ impl<S: Schema> ActiveGames<S> {
             .get_mut(id)
             .ok_or(ThundersClientError::RoomNotFound)?
             .as_mut()
-            .on_change(message)?)
+            .on_change(message)
     }
 
     pub fn create<G: GameState + Send + Sync + 'static>(
@@ -89,7 +88,7 @@ impl<S: Schema> ActiveGames<S> {
         game: G,
     ) -> Result<(), ThundersClientError>
     where
-        G::Change: Deserialize<S>,
+        G::Change: for<'a> Deserialize<'a, S>,
     {
         self.current
             .get(type_)
@@ -125,14 +124,13 @@ impl<S: Schema> ActiveGames<S> {
         type_: &str,
         id: &str,
     ) -> Result<Box<dyn GenericGameState<S> + Send + Sync>, ThundersClientError> {
-        Ok(self
-            .current
+        self.current
             .get(type_)
             .ok_or(ThundersClientError::RoomTypeNotFound)?
             .write()
             .expect("Should always get write lock successfully")
             .remove(id)
-            .ok_or(ThundersClientError::RoomNotFound)?)
+            .ok_or(ThundersClientError::RoomNotFound)
     }
 }
 

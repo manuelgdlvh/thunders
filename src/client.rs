@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     collections::HashMap,
     sync::{Arc, RwLock},
     time::Duration,
@@ -60,7 +59,7 @@ where
 
     pub async fn build(self) -> Result<ThundersClient<S>, ThundersClientError>
     where
-        for<'a> OutputMessage<'a>: Deserialize<S>,
+        for<'a> OutputMessage<'a>: Deserialize<'a, S>,
     {
         let p_handle = self.protocol.run(Arc::clone(&self.active_games)).await?;
 
@@ -86,10 +85,10 @@ impl<S: Schema + 'static> ThundersClient<S> {
         let reply = self
             .p_handle
             .reply_manager
-            .register(correlation_id.clone(), expires_in);
+            .register(correlation_id.as_str(), expires_in);
 
         self.try_send(InputMessage::Connect {
-            correlation_id: Cow::Owned(correlation_id),
+            correlation_id: correlation_id.as_str(),
             id: player_id,
         });
 
@@ -107,34 +106,34 @@ impl<S: Schema + 'static> ThundersClient<S> {
     pub async fn create<G: GameState + Send + Sync + 'static>(
         &self,
         type_: &'static str,
-        id: String,
+        id: &str,
         options: G::Options,
         expires_in: Duration,
     ) -> Result<(), ThundersClientError>
     where
-        G::Change: Deserialize<S>,
+        G::Change: for<'a> Deserialize<'a, S>,
         G::Options: Serialize<S>,
     {
         let game = G::build(&options);
-        self.active_games.create(type_, id.clone(), game)?;
+        self.active_games.create(type_, id.to_string(), game)?;
 
         let correlation_id = Uuid::new_v4().to_string();
         let reply = self
             .p_handle
             .reply_manager
-            .register(correlation_id.clone(), expires_in);
+            .register(correlation_id.as_str(), expires_in);
 
         let options_serialized = options.serialize();
-        let options = if options_serialized.len() > 0 {
-            Some(options_serialized)
+        let options = if !options_serialized.is_empty() {
+            Some(options_serialized.as_slice())
         } else {
             None
         };
 
         self.try_send(InputMessage::Create {
-            correlation_id: Cow::Owned(correlation_id),
-            type_: Cow::Borrowed(type_),
-            id: Cow::Borrowed(id.as_str()),
+            correlation_id: correlation_id.as_str(),
+            type_: type_,
+            id,
             options,
         });
 
@@ -153,7 +152,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
         };
 
         if should_rollback {
-            self.active_games.remove(type_, id.as_str())?;
+            self.active_games.remove(type_, id)?;
         }
 
         result
@@ -162,25 +161,25 @@ impl<S: Schema + 'static> ThundersClient<S> {
     pub async fn join<G: GameState + Send + Sync + 'static>(
         &self,
         type_: &'static str,
-        id: String,
+        id: &str,
         expires_in: Duration,
     ) -> Result<(), ThundersClientError>
     where
-        G::Change: Deserialize<S>,
+        G::Change: for<'a> Deserialize<'a, S>,
     {
         let game = G::build(&G::Options::default());
-        self.active_games.create(type_, id.clone(), game)?;
+        self.active_games.create(type_, id.to_string(), game)?;
 
         let correlation_id = Uuid::new_v4().to_string();
         let reply = self
             .p_handle
             .reply_manager
-            .register(correlation_id.clone(), expires_in);
+            .register(correlation_id.as_str(), expires_in);
 
         self.try_send(InputMessage::Join {
-            correlation_id: Cow::Owned(correlation_id),
-            type_: Cow::Borrowed(type_),
-            id: Cow::Borrowed(id.as_str()),
+            correlation_id: correlation_id.as_str(),
+            type_: type_,
+            id,
         });
         let mut should_rollback = true;
         let result = if let Ok(reply) = reply.await {
@@ -197,7 +196,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
         };
 
         if should_rollback {
-            self.active_games.remove(type_, id.as_str())?;
+            self.active_games.remove(type_, id)?;
         }
 
         result
@@ -213,9 +212,9 @@ impl<S: Schema + 'static> ThundersClient<S> {
         G::Action: BorrowedSerialize<S>,
     {
         self.try_send(InputMessage::Action {
-            type_: Cow::Borrowed(type_),
-            id: Cow::Borrowed(id),
-            data: action.serialize(),
+            type_: type_,
+            id: id,
+            data: action.serialize().as_slice(),
         });
 
         self.active_games.action::<G>(type_, id, action)

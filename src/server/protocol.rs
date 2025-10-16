@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     collections::HashMap,
     sync::{Arc, RwLock},
 };
@@ -8,7 +7,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use crate::{
     api::{
         message::{InputMessage, OutputMessage},
-        schema::{BorrowedDeserialize, Schema, Serialize},
+        schema::{Deserialize, Schema, Serialize},
     },
     server::{
         ThundersServerResult, context::PlayerContext, error::ThundersServerError,
@@ -26,7 +25,7 @@ pub trait NetworkProtocol {
         handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
     ) -> impl Future<Output = ThundersServerResult>
     where
-        for<'a> InputMessage<'a>: BorrowedDeserialize<'a, S>;
+        for<'a> InputMessage<'a>: Deserialize<'a, S>;
 }
 
 pub fn disconnect(
@@ -51,17 +50,14 @@ pub fn connect<S: Schema>(
     session_manager: &SessionManager,
 ) -> Result<(Arc<PlayerContext>, UnboundedReceiver<Vec<u8>>), ThundersServerError>
 where
-    for<'a> InputMessage<'a>: BorrowedDeserialize<'a, S>,
+    for<'a> InputMessage<'a>: Deserialize<'a, S>,
 {
     let raw_message_ref = raw_message.as_slice();
-    if let Ok(message) = <InputMessage as BorrowedDeserialize<S>>::deserialize(raw_message_ref) {
+    if let Ok(message) = <InputMessage as Deserialize<S>>::deserialize(raw_message_ref) {
         match message {
             InputMessage::Connect { correlation_id, id } => {
                 let player_cxt = Arc::new(PlayerContext::new(id));
-                Ok((
-                    player_cxt,
-                    session_manager.connect(correlation_id.as_ref(), id),
-                ))
+                Ok((player_cxt, session_manager.connect(correlation_id, id)))
             }
             _ => Err(ThundersServerError::MessageNotConnected),
         }
@@ -76,10 +72,10 @@ pub fn process_message<S: Schema>(
     session_manager: &SessionManager,
     handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
 ) where
-    for<'a> InputMessage<'a>: BorrowedDeserialize<'a, S>,
+    for<'a> InputMessage<'a>: Deserialize<'a, S>,
 {
     let raw_message_ref = raw_message.as_slice();
-    if let Ok(message) = <InputMessage as BorrowedDeserialize<S>>::deserialize(raw_message_ref) {
+    if let Ok(message) = <InputMessage as Deserialize<S>>::deserialize(raw_message_ref) {
         match message {
             InputMessage::Create {
                 correlation_id,
@@ -87,20 +83,16 @@ pub fn process_message<S: Schema>(
                 id,
                 options,
             } => {
-                if let Some(handler) = handlers.get(type_.as_ref()) {
-                    session_manager.subscribe(
-                        player_cxt.id(),
-                        type_.into_owned(),
-                        id.as_ref().to_string(),
-                    );
+                if let Some(handler) = handlers.get(type_) {
+                    session_manager.subscribe(player_cxt.id(), type_, id);
 
                     // TODO: Check result to send success or not
-                    handler.register(Arc::clone(&player_cxt), id.into_owned(), options);
+                    handler.register(Arc::clone(&player_cxt), id, options);
 
                     session_manager.send(
                         player_cxt.id(),
                         OutputMessage::Create {
-                            correlation_id: Cow::Owned(correlation_id.into_owned()),
+                            correlation_id,
                             success: true,
                         },
                     );
@@ -114,18 +106,14 @@ pub fn process_message<S: Schema>(
                 type_,
                 id,
             } => {
-                if let Some(handler) = handlers.get(type_.as_ref()) {
-                    session_manager.subscribe(
-                        player_cxt.id(),
-                        type_.into_owned(),
-                        id.as_ref().to_string(),
-                    );
-                    handler.join(Arc::clone(&player_cxt), id.into_owned());
+                if let Some(handler) = handlers.get(type_) {
+                    session_manager.subscribe(player_cxt.id(), type_, id);
+                    handler.join(Arc::clone(player_cxt), id);
 
                     session_manager.send(
                         player_cxt.id(),
                         OutputMessage::Join {
-                            correlation_id: Cow::Owned(correlation_id.into_owned()),
+                            correlation_id,
                             success: true,
                         },
                     );
@@ -134,8 +122,8 @@ pub fn process_message<S: Schema>(
                 }
             }
             InputMessage::Action { type_, id, data } => {
-                if let Some(handler) = handlers.get(type_.as_ref()) {
-                    let _ = handler.action(player_cxt.id(), id.into_owned(), data);
+                if let Some(handler) = handlers.get(type_) {
+                    let _ = handler.action(player_cxt.id(), id, data);
                 }
             }
             _ => {}
@@ -159,7 +147,7 @@ impl SessionManager {
 
         tx.send(
             OutputMessage::Connect {
-                correlation_id: Cow::Borrowed(correlation_id),
+                correlation_id,
                 success: true,
             }
             .serialize(),
@@ -176,15 +164,15 @@ impl SessionManager {
         rx
     }
 
-    pub fn subscribe(&self, player_id: u64, type_: String, id: String) {
+    pub fn subscribe(&self, player_id: u64, type_: &str, id: &str) {
         if let Ok(mut subscriptions) = self.subscriptions.write() {
             let subscriptions = subscriptions
                 .get_mut(&player_id)
                 .expect("Player subscriptions should always exists if connected");
             subscriptions
-                .entry(type_)
+                .entry(type_.to_string())
                 .or_insert(Default::default())
-                .push(id);
+                .push(id.to_string());
         }
     }
 
@@ -216,7 +204,7 @@ impl SessionManager {
 
         for p_id in player_ids {
             if let Ok(sessions) = self.sessions.read()
-                && let Some(session) = sessions.get(&p_id)
+                && let Some(session) = sessions.get(p_id)
             {
                 let _ = session.send(raw_message.clone());
             }

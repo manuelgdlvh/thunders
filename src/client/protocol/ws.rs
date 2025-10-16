@@ -36,7 +36,7 @@ impl ClientProtocol for WebSocketClientProtocol {
     ) -> Result<ClientProtocolHandle, ThundersClientError>
     where
         S: Schema + 'static,
-        for<'a> OutputMessage<'a>: Deserialize<S>,
+        for<'a> OutputMessage<'a>: Deserialize<'a, S>,
     {
         let request = format!("ws://{}:{}", self.addr, self.port)
             .into_client_request()
@@ -83,27 +83,28 @@ impl ClientProtocol for WebSocketClientProtocol {
                          },
                          Some(Ok(message)) = ws_receiver.next() => {
                             let raw_message = message_into_bytes(message);
-                            if let Ok(output) = <OutputMessage as Deserialize<S>>::deserialize(raw_message) {
+                            let raw_message_ref = raw_message.as_slice();
+                            if let Ok(output) = <OutputMessage as Deserialize<S>>::deserialize(raw_message_ref) {
                                            match output {
                                                 OutputMessage::Connect{correlation_id, success} => {
                                                     if success {
-                                                        reply_manager.ok(&correlation_id.into_owned(), ());
+                                                        reply_manager.ok(correlation_id, ());
                                                     }else {
-                                                        reply_manager.error(&correlation_id.into_owned(), ThundersClientError::ConnectionFailure);
+                                                        reply_manager.error(correlation_id, ThundersClientError::ConnectionFailure);
                                                     }
                                                },
                                                OutputMessage::Join{correlation_id, success} => {
                                                     if success {
-                                                        reply_manager.ok(&correlation_id.into_owned(), ());
+                                                        reply_manager.ok(correlation_id, ());
                                                     }else {
-                                                        reply_manager.error(&correlation_id.into_owned(), ThundersClientError::GameJoinFailure);
+                                                        reply_manager.error(correlation_id, ThundersClientError::GameJoinFailure);
                                                     }
                                               },
                                                OutputMessage::Create{correlation_id, success} => {
                                                     if success {
-                                                        reply_manager.ok(&correlation_id.into_owned(), ());
+                                                        reply_manager.ok(correlation_id, ());
                                                     }else {
-                                                        reply_manager.error(&correlation_id.into_owned(), ThundersClientError::GameCreationFailure);
+                                                        reply_manager.error(correlation_id, ThundersClientError::GameCreationFailure);
                                                     }
                                                }
                                               OutputMessage::Diff{type_, id, finished, data} => {

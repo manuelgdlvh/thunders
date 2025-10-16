@@ -18,7 +18,7 @@ pub mod ws;
 
 pub struct ClientProtocolHandle {
     pub sender: UnboundedSender<InboundAction>,
-    pub reply_manager: Arc<ReplyManager<String, (), ThundersClientError>>,
+    pub reply_manager: Arc<ReplyManager<(), ThundersClientError>>,
     pub running: Arc<AtomicBool>,
 }
 
@@ -29,5 +29,5 @@ pub trait ClientProtocol {
     ) -> impl Future<Output = Result<ClientProtocolHandle, ThundersClientError>>
     where
         S: Schema + 'static,
-        for<'a> OutputMessage<'a>: Deserialize<S>;
+        for<'a> OutputMessage<'a>: Deserialize<'a, S>;
 }

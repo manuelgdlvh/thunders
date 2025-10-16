@@ -1,48 +1,46 @@
-use std::borrow::Cow;
-
 pub enum InputMessage<'a> {
     Connect {
-        correlation_id: Cow<'a, str>,
+        correlation_id: &'a str,
         id: u64,
     },
     Create {
-        correlation_id: Cow<'a, str>,
-        type_: Cow<'a, str>,
-        id: Cow<'a, str>,
-        options: Option<Vec<u8>>,
+        correlation_id: &'a str,
+        type_: &'a str,
+        id: &'a str,
+        options: Option<&'a [u8]>,
     },
     Join {
-        correlation_id: Cow<'a, str>,
-        type_: Cow<'a, str>,
-        id: Cow<'a, str>,
+        correlation_id: &'a str,
+        type_: &'a str,
+        id: &'a str,
     },
     Action {
-        type_: Cow<'a, str>,
-        id: Cow<'a, str>,
-        data: Vec<u8>,
+        type_: &'a str,
+        id: &'a str,
+        data: &'a [u8],
     },
 }
 
 pub enum OutputMessage<'a> {
     Connect {
-        correlation_id: Cow<'a, str>,
+        correlation_id: &'a str,
         success: bool,
     },
     Create {
-        correlation_id: Cow<'a, str>,
+        correlation_id: &'a str,
         success: bool,
     },
     Join {
-        correlation_id: Cow<'a, str>,
+        correlation_id: &'a str,
         success: bool,
     },
     Diff {
-        type_: Cow<'static, str>,
-        id: Cow<'a, str>,
+        type_: &'a str,
+        id: &'a str,
         finished: bool,
-        data: Vec<u8>,
+        data: &'a [u8],
     },
     GenericError {
-        description: Cow<'static, str>,
+        description: &'a str,
     },
 }

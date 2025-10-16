@@ -22,8 +22,8 @@ where
     S: Schema,
     H: GameHooks,
     H::Delta: Serialize<S>,
-    H::Options: Deserialize<S>,
-    H::Action: Deserialize<S>,
+    H::Options: for<'a> Deserialize<'a, S>,
+    H::Action: for<'a> Deserialize<'a, S>,
 {
     type Handle: GameHandle<H>;
     type Settings: Send + Sync;
@@ -54,8 +54,8 @@ where
     H: GameHooks,
     S: Schema,
     H::Delta: Serialize<S>,
-    H::Options: Deserialize<S>,
-    H::Action: Deserialize<S>,
+    H::Options: for<'a> Deserialize<'a, S>,
+    H::Action: for<'a> Deserialize<'a, S>,
 {
     type_: &'static str,
     settings: R::Settings,
@@ -69,8 +69,8 @@ where
     H: GameHooks,
     S: Schema,
     H::Delta: Serialize<S>,
-    H::Options: Deserialize<S>,
-    H::Action: Deserialize<S>,
+    H::Options: for<'a> Deserialize<'a, S>,
+    H::Action: for<'a> Deserialize<'a, S>,
 {
     pub fn new(
         type_: &'static str,
@@ -125,10 +125,10 @@ where
 }
 
 pub trait GameRuntimeAnyHandle: Send + Sync {
-    fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: Option<Vec<u8>>);
-    fn join(&self, cxt: Arc<PlayerContext>, room_id: String);
+    fn register(&self, cxt: Arc<PlayerContext>, room_id: &str, options: Option<&[u8]>);
+    fn join(&self, cxt: Arc<PlayerContext>, room_id: &str);
     fn leave(&self, cxt: u64, room_id: String);
-    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), ThundersError>;
+    fn action(&self, cxt: u64, room_id: &str, action: &[u8]) -> Result<(), ThundersError>;
 }
 
 impl<R, H, S> GameRuntimeAnyHandle for GameRuntimeHandle<R, H, S>
@@ -137,37 +137,36 @@ where
     H: GameHooks,
     S: Schema,
     H::Delta: Serialize<S>,
-    H::Options: Deserialize<S>,
-    H::Action: Deserialize<S>,
+    H::Options: for<'a> Deserialize<'a, S>,
+    H::Action: for<'a> Deserialize<'a, S>,
 {
-    fn register(&self, cxt: Arc<PlayerContext>, room_id: String, options: Option<Vec<u8>>) {
+    fn register(&self, cxt: Arc<PlayerContext>, room_id: &str, options: Option<&[u8]>) {
         if let Some(options) = options {
             match <H::Options as Deserialize<S>>::deserialize(options) {
                 Ok(options) => {
-                    self.register(cxt, room_id, options);
+                    self.register(cxt, room_id.to_string(), options);
                 }
                 Err(err) => {
                     self.session_manager.send(cxt.id(), err);
                 }
             }
         } else {
-            self.register(cxt, room_id, H::Options::default());
+            self.register(cxt, room_id.to_string(), H::Options::default());
         }
     }
 
-    fn join(&self, cxt: Arc<PlayerContext>, room_id: String) {
-        self.join(cxt, room_id);
+    fn join(&self, cxt: Arc<PlayerContext>, room_id: &str) {
+        self.join(cxt, room_id.to_string());
     }
 
     fn leave(&self, cxt: u64, room_id: String) {
         self.leave(cxt, room_id);
     }
 
-    fn action(&self, cxt: u64, room_id: String, action: Vec<u8>) -> Result<(), ThundersError> {
-        // TODO: Check if action can be borrowed to avoid allocation due to standarization of Deserialize to Borrowed.
+    fn action(&self, cxt: u64, room_id: &str, action: &[u8]) -> Result<(), ThundersError> {
         match <H::Action as Deserialize<S>>::deserialize(action) {
             Ok(action) => {
-                self.action(cxt, room_id, action);
+                self.action(cxt, room_id.to_string(), action);
                 Ok(())
             }
             Err(err) => Err(err),

@@ -1,7 +1,6 @@
 use std::{
     collections::{BinaryHeap, HashMap},
-    hash::Hash,
-    sync::{Mutex, RwLock, atomic::AtomicBool},
+    sync::{Mutex, RwLock},
     time::{Duration, Instant},
 };
 
@@ -14,46 +13,31 @@ pub enum Reply<R, E> {
 }
 
 #[derive(PartialEq, Eq)]
-struct RegisteredTimeout<Id>
-where
-    Id: Eq + Hash,
-{
-    id: Id,
+struct RegisteredTimeout {
+    id: String,
     expires_at: Instant,
 }
 
-impl<Id> Ord for RegisteredTimeout<Id>
-where
-    Id: Eq + Hash,
-{
+impl Ord for RegisteredTimeout {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         other.expires_at.cmp(&self.expires_at)
     }
 }
 
-impl<Id> PartialOrd for RegisteredTimeout<Id>
-where
-    Id: PartialEq + Eq + Hash,
-{
+impl PartialOrd for RegisteredTimeout {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-pub struct ReplyManager<Id, R, E>
-where
-    Id: Eq + Hash,
-{
-    replies_registry: Mutex<HashMap<Id, Sender<Reply<R, E>>>>,
-    registered_timeouts: RwLock<BinaryHeap<RegisteredTimeout<Id>>>,
+pub struct ReplyManager<R, E> {
+    replies_registry: Mutex<HashMap<String, Sender<Reply<R, E>>>>,
+    registered_timeouts: RwLock<BinaryHeap<RegisteredTimeout>>,
     // TODO: improve this using custom wakers
     tick_interval: tokio::time::Duration,
 }
 
-impl<Id, R, E> ReplyManager<Id, R, E>
-where
-    Id: Eq + Hash + Clone,
-{
+impl<R, E> ReplyManager<R, E> {
     pub fn new(tick_interval: tokio::time::Duration) -> Self {
         Self {
             replies_registry: Mutex::new(HashMap::new()),
@@ -62,20 +46,19 @@ where
         }
     }
 
-    pub fn register(&self, id: impl Into<Id>, expires_in: Duration) -> Receiver<Reply<R, E>> {
+    pub fn register(&self, id: &str, expires_in: Duration) -> Receiver<Reply<R, E>> {
         let (tx, rx) = oneshot::channel::<Reply<R, E>>();
 
-        let id = id.into();
         self.replies_registry
             .lock()
             .expect("Should lock always be acquirable")
-            .insert(id.clone(), tx);
+            .insert(id.to_string(), tx);
 
         self.registered_timeouts
             .write()
             .expect("Should write lock always be acquirable")
             .push(RegisteredTimeout {
-                id,
+                id: id.to_string(),
                 expires_at: Instant::now()
                     .checked_add(expires_in)
                     .expect("Should expires never overflow internal structure"),
@@ -83,13 +66,13 @@ where
         rx
     }
 
-    pub fn ok(&self, id: &Id, result: R) {
+    pub fn ok(&self, id: &str, result: R) {
         if let Some(pending_reply) = self.replies_registry.lock().expect("").remove(id) {
             let _ = pending_reply.send(Reply::Ok(result));
         }
     }
 
-    pub fn error(&self, id: &Id, error: E) {
+    pub fn error(&self, id: &str, error: E) {
         if let Some(pending_reply) = self.replies_registry.lock().expect("").remove(id) {
             let _ = pending_reply.send(Reply::Err(error));
         }

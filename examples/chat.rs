@@ -40,7 +40,7 @@ pub async fn main() {
     if let Err(err) = client_1
         .create::<ChatClient>(
             LOBBY_TYPE,
-            LOBBY_ID.to_string(),
+            LOBBY_ID,
             Default::default(),
             Duration::from_secs(5),
         )
@@ -52,7 +52,7 @@ pub async fn main() {
     let client_2 = spawn_client(2).await;
 
     if let Err(err) = client_2
-        .join::<ChatClient>(LOBBY_TYPE, LOBBY_ID.to_string(), Duration::from_secs(5))
+        .join::<ChatClient>(LOBBY_TYPE, LOBBY_ID, Duration::from_secs(5))
         .await
     {
         panic!("{:?}", err);
@@ -200,11 +200,11 @@ impl GameHooks for Chat {
         }
     }
 
-    fn leave(&self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>> {
+    fn leave(&self, _player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>> {
         None
     }
 
-    fn join(&self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>> {
+    fn join(&self, _player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>> {
         None
     }
 

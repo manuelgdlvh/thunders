@@ -1,15 +1,13 @@
 use crate::api::message::OutputMessage;
 use std::error::Error;
-use std::{borrow::Cow, fmt::Display};
+use std::fmt::Display;
 
-impl<'a> Into<OutputMessage<'a>> for ThundersServerError {
-    fn into(self) -> OutputMessage<'a> {
-        let description = match self {
+impl<'a> From<ThundersServerError> for OutputMessage<'a> {
+    fn from(val: ThundersServerError) -> Self {
+        let description = match val {
             _ => "Generic error, please provide more details",
         };
-        OutputMessage::GenericError {
-            description: Cow::Borrowed(description),
-        }
+        OutputMessage::GenericError { description }
     }
 }
 

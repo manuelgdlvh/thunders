@@ -41,11 +41,12 @@ impl SyncRuntime {
         match diff {
             Diff::All { delta } => {
                 let diff = DiffNotification::new(self.type_, self.id.as_str(), delta.serialize());
-                self.session_manager.send_all(self.players_cxt.keys(), diff);
+                self.session_manager
+                    .send_all(self.players_cxt.keys(), &diff);
             }
             Diff::Target { ids, delta } => {
                 let diff = DiffNotification::new(self.type_, self.id.as_str(), delta.serialize());
-                self.session_manager.send_all(ids.iter(), diff);
+                self.session_manager.send_all(ids.iter(), &diff);
             }
         }
     }
@@ -56,8 +57,8 @@ where
     H: GameHooks,
     S: Schema,
     H::Delta: Serialize<S>,
-    H::Options: Deserialize<S>,
-    H::Action: Deserialize<S>,
+    H::Options: for<'a> Deserialize<'a, S>,
+    H::Action: for<'a> Deserialize<'a, S>,
     for<'a> OutputMessage<'a>: Serialize<S>,
 {
     type Handle = SyncGameHandle<H>;
@@ -96,7 +97,8 @@ where
                     }
 
                     let diff = DiffNotification::finish(self.type_, self.id.as_str());
-                    self.session_manager.send_all(self.players_cxt.keys(), diff);
+                    self.session_manager
+                        .send_all(self.players_cxt.keys(), &diff);
                     break;
                 }
                 if let Ok(event) = actions_rx.recv_timeout(self.action_timeout) {
@@ -108,11 +110,12 @@ where
                         }
 
                         Event::Leave(id) => {
-                            if let Some(player_context) = self.players_cxt.remove(&id) {
-                                if let Some(diff) = hooks.leave(player_context.as_ref()) {
-                                    self.process_diff::<H, S>(diff);
-                                }
+                            if let Some(player_context) = self.players_cxt.remove(&id)
+                                && let Some(diff) = hooks.leave(player_context.as_ref())
+                            {
+                                self.process_diff::<H, S>(diff);
                             }
+
                             continue;
                         }
 
@@ -136,10 +139,10 @@ where
                             actions_buffer.push((event.0, action));
                         }
                         Event::Leave(id) => {
-                            if let Some(player_context) = self.players_cxt.remove(&id) {
-                                if let Some(diff) = hooks.leave(player_context.as_ref()) {
-                                    self.process_diff::<H, S>(diff);
-                                }
+                            if let Some(player_context) = self.players_cxt.remove(&id)
+                                && let Some(diff) = hooks.leave(player_context.as_ref())
+                            {
+                                self.process_diff::<H, S>(diff);
                             }
                         }
 

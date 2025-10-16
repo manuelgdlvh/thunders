@@ -1,6 +1,4 @@
-// Send actions and update the state. Each tick returns the delta.
-
-use std::{borrow::Cow, collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{api::message::OutputMessage, server::context::PlayerContext};
 
@@ -65,13 +63,13 @@ impl<'a> DiffNotification<'a> {
     }
 }
 
-impl<'a> Into<OutputMessage<'a>> for DiffNotification<'a> {
-    fn into(self) -> OutputMessage<'a> {
+impl<'a> From<&'a DiffNotification<'a>> for OutputMessage<'a> {
+    fn from(val: &'a DiffNotification<'a>) -> Self {
         OutputMessage::Diff {
-            type_: Cow::Borrowed(self.type_),
-            id: Cow::Owned(self.id.to_string()),
-            finished: self.finished,
-            data: self.data,
+            type_: val.type_,
+            id: val.id,
+            finished: val.finished,
+            data: val.data.as_slice(),
         }
     }
 }

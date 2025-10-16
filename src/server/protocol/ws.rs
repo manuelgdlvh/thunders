@@ -10,7 +10,7 @@ use tokio_tungstenite::{
 use crate::{
     api::{
         message::{InputMessage, OutputMessage},
-        schema::{BorrowedDeserialize, Schema, SchemaType, Serialize},
+        schema::{Deserialize, Schema, SchemaType, Serialize},
     },
     server::{
         ThundersServerResult,
@@ -41,7 +41,7 @@ impl NetworkProtocol for WebSocketProtocol {
         handlers: &'static HashMap<&'static str, Box<dyn GameRuntimeAnyHandle>>,
     ) -> ThundersServerResult
     where
-        for<'a> InputMessage<'a>: BorrowedDeserialize<'a, S>,
+        for<'a> InputMessage<'a>: Deserialize<'a, S>,
     {
         let listener = TcpListener::bind(format!("{}:{}", self.addr, self.port).as_str())
             .await
@@ -66,22 +66,14 @@ impl NetworkProtocol for WebSocketProtocol {
                             Ok((cxt, mut receiver)) => {
                                 player_cxt = cxt;
                                 tokio::spawn(async move {
-                                    loop {
-                                        match receiver.recv().await {
-                                            Some(raw_message) => {
-                                                if write
-                                                    .send(bytes_into_message::<S>(raw_message))
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    break;
-                                                }
-                                            }
-
-                                            None => {
-                                                break;
-                                            }
-                                        };
+                                    while let Some(raw_message) = receiver.recv().await {
+                                        if write
+                                            .send(bytes_into_message::<S>(raw_message))
+                                            .await
+                                            .is_err()
+                                        {
+                                            break;
+                                        }
                                     }
                                 });
                             }

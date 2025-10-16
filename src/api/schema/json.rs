@@ -1,9 +1,9 @@
-use serde_json::Value;
+use serde_json::{Value, value::RawValue};
 
 use crate::api::{
     error::ThundersError,
     message::{InputMessage, OutputMessage},
-    schema::{BorrowedDeserialize, BorrowedSerialize, Schema, SchemaType, Serialize},
+    schema::{BorrowedSerialize, Deserialize, Schema, SchemaType, Serialize},
 };
 
 #[derive(Default)]
@@ -33,12 +33,12 @@ where
     }
 }
 
-impl<T> crate::api::schema::Deserialize<Json> for T
+impl<'de, T> Deserialize<'de, Json> for T
 where
-    for<'de> T: serde::Deserialize<'de>,
+    T: serde::Deserialize<'de>,
 {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
-        serde_json::from_slice(&value).map_err(|_| ThundersError::DeserializationFailure)
+    fn deserialize(buf: &'de [u8]) -> Result<Self, ThundersError> {
+        serde_json::from_slice(buf).map_err(|_| ThundersError::DeserializationFailure)
     }
 }
 
@@ -69,7 +69,7 @@ impl Serialize<Json> for InputMessage<'_> {
                         .expect("Should always be a object")
                         .insert(
                             OPTIONS.to_string(),
-                            serde_json::from_slice::<Value>(options.as_slice())
+                            serde_json::from_slice::<Value>(options)
                                 .expect("Should always be serializable"),
                         );
                 }
@@ -99,7 +99,7 @@ impl Serialize<Json> for InputMessage<'_> {
                         .expect("Should always be a object")
                         .insert(
                             DATA.to_string(),
-                            serde_json::from_slice::<Value>(data.as_slice())
+                            serde_json::from_slice::<Value>(data)
                                 .expect("Should always be serializable"),
                         );
                 }
@@ -112,13 +112,10 @@ impl Serialize<Json> for InputMessage<'_> {
     }
 }
 
-use serde::de::{self, Deserialize, DeserializeSeed, Deserializer, MapAccess, Visitor};
+use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
 use std::borrow::Cow;
 
-impl<'de> BorrowedDeserialize<'de, Json> for InputMessage<'de>
-where
-    Json: Schema,
-{
+impl<'de> Deserialize<'de, Json> for InputMessage<'de> {
     fn deserialize(buf: &'de [u8]) -> Result<Self, ThundersError> {
         let mut de = serde_json::Deserializer::from_slice(buf);
 
@@ -152,7 +149,8 @@ where
                     where
                         D: Deserializer<'de2>,
                     {
-                        let k: Cow<'de2, str> = Cow::deserialize(d)?;
+                        let k: Cow<'de2, str> =
+                            <Cow<'de2, str> as serde::Deserialize>::deserialize(d)?;
                         Ok(match &*k {
                             METHOD => Field::Method,
                             CORRELATION_ID => Field::Corr,
@@ -166,13 +164,13 @@ where
                     }
                 }
 
-                let mut method: Option<Cow<'de2, str>> = None;
-                let mut corr: Option<Cow<'de2, str>> = None;
-                let mut ty: Option<Cow<'de2, str>> = None;
-                let mut id: Option<Cow<'de2, str>> = None;
+                let mut method: Option<&'de2 str> = None;
+                let mut corr: Option<&'de2 str> = None;
+                let mut ty: Option<&'de2 str> = None;
+                let mut id: Option<&'de2 str> = None;
                 let mut p_id: Option<u64> = None;
-                let mut options_bytes: Option<Vec<u8>> = None;
-                let mut data_bytes: Option<Vec<u8>> = None;
+                let mut options_bytes: Option<&'de2 [u8]> = None;
+                let mut data_bytes: Option<&'de2 [u8]> = None;
 
                 while let Some(f) = map.next_key_seed(FieldSeed)? {
                     match f {
@@ -182,12 +180,12 @@ where
                         Field::Id => id = Some(map.next_value()?),
                         Field::PId => p_id = Some(map.next_value()?),
                         Field::Options => {
-                            let v: serde_json::Value = map.next_value()?;
-                            options_bytes = Some(serde_json::to_vec(&v).unwrap_or_default());
+                            let raw: &RawValue = map.next_value()?;
+                            options_bytes = Some(raw.get().as_bytes());
                         }
                         Field::Data => {
-                            let v: serde_json::Value = map.next_value()?;
-                            data_bytes = Some(serde_json::to_vec(&v).unwrap_or_default());
+                            let raw: &RawValue = map.next_value()?;
+                            data_bytes = Some(raw.get().as_bytes());
                         }
                         Field::Unknown => {
                             let _: de::IgnoredAny = map.next_value()?;
@@ -196,7 +194,7 @@ where
                 }
 
                 let method = method.ok_or_else(|| de::Error::custom("missing `method`"))?;
-                match &*method {
+                match method {
                     CONNECT => {
                         let id_num =
                             p_id.ok_or_else(|| de::Error::custom("missing `p_id` for connect"))?;
@@ -324,7 +322,7 @@ impl<'a> Serialize<Json> for OutputMessage<'a> {
                         .expect("Should always be a object")
                         .insert(
                             DATA.to_string(),
-                            serde_json::from_slice::<Value>(data.as_slice())
+                            serde_json::from_slice::<Value>(data)
                                 .expect("Should always be serializable"),
                         );
                 }
@@ -337,124 +335,141 @@ impl<'a> Serialize<Json> for OutputMessage<'a> {
     }
 }
 
-impl<'a> crate::api::schema::Deserialize<Json> for OutputMessage<'a> {
-    fn deserialize(value: Vec<u8>) -> Result<Self, ThundersError> {
-        let json: Value = serde_json::from_slice(value.as_slice())
-            .map_err(|_| ThundersError::DeserializationFailure)?;
+impl<'de> crate::api::schema::Deserialize<'de, Json> for OutputMessage<'de> {
+    fn deserialize(buf: &'de [u8]) -> Result<Self, ThundersError> {
+        let mut de = serde_json::Deserializer::from_slice(buf);
 
-        let method = json
-            .get(METHOD)
-            .ok_or(ThundersError::DeserializationFailure)?;
-        match method
-            .as_str()
-            .ok_or(ThundersError::DeserializationFailure)?
-        {
-            CONNECT => {
-                let success = json
-                    .get(SUCCESS)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                let correlation_id = json
-                    .get(CORRELATION_ID)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                Ok(OutputMessage::Connect {
-                    correlation_id: Cow::Owned(
-                        correlation_id
-                            .as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                    success: success
-                        .as_bool()
-                        .ok_or(ThundersError::DeserializationFailure)?,
-                })
-            }
-            JOIN => {
-                let success = json
-                    .get(SUCCESS)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                let correlation_id = json
-                    .get(CORRELATION_ID)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                Ok(OutputMessage::Join {
-                    correlation_id: Cow::Owned(
-                        correlation_id
-                            .as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                    success: success
-                        .as_bool()
-                        .ok_or(ThundersError::DeserializationFailure)?,
-                })
-            }
-            CREATE => {
-                let success = json
-                    .get(SUCCESS)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                let correlation_id = json
-                    .get(CORRELATION_ID)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                Ok(OutputMessage::Create {
-                    correlation_id: Cow::Owned(
-                        correlation_id
-                            .as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                    success: success
-                        .as_bool()
-                        .ok_or(ThundersError::DeserializationFailure)?,
-                })
+        struct Root;
+
+        impl<'de2> Visitor<'de2> for Root {
+            type Value = OutputMessage<'de2>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("flat JSON {method, correlation_id, id, p_id, type, options?, data?}")
             }
 
-            DIFF => {
-                let type_ = json
-                    .get(TYPE)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                let id = json.get(ID).ok_or(ThundersError::DeserializationFailure)?;
-                let finished = json
-                    .get(FINISHED)
-                    .ok_or(ThundersError::DeserializationFailure)?;
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de2>,
+            {
+                enum Field {
+                    Method,
+                    Corr,
+                    Success,
+                    Type,
+                    Id,
+                    Finished,
+                    Data,
+                    Description,
+                    Unknown,
+                }
+                struct FieldSeed;
+                impl<'de2> DeserializeSeed<'de2> for FieldSeed {
+                    type Value = Field;
+                    fn deserialize<D>(self, d: D) -> Result<Self::Value, D::Error>
+                    where
+                        D: Deserializer<'de2>,
+                    {
+                        let k: Cow<'de2, str> =
+                            <Cow<'de2, str> as serde::Deserialize>::deserialize(d)?;
+                        Ok(match &*k {
+                            METHOD => Field::Method,
+                            CORRELATION_ID => Field::Corr,
+                            ID => Field::Id,
+                            TYPE => Field::Type,
+                            SUCCESS => Field::Success,
+                            FINISHED => Field::Finished,
+                            DATA => Field::Data,
+                            DESCRIPTION => Field::Description,
+                            _ => Field::Unknown,
+                        })
+                    }
+                }
 
-                let data = if let Some(value) = json.get(DATA) {
-                    serde_json::to_vec(value).expect("Should always be deserializable")
-                } else {
-                    vec![]
-                };
+                let mut method: Option<&'de2 str> = None;
+                let mut corr: Option<&'de2 str> = None;
+                let mut ty: Option<&'de2 str> = None;
+                let mut id: Option<&'de2 str> = None;
+                let mut success: Option<bool> = None;
+                let mut finished: Option<bool> = None;
+                let mut description: Option<&'de2 str> = None;
+                let mut data_bytes: Option<&'de2 [u8]> = None;
 
-                Ok(OutputMessage::Diff {
-                    type_: Cow::Owned(
-                        type_
-                            .as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                    id: Cow::Owned(
-                        id.as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                    finished: finished
-                        .as_bool()
-                        .ok_or(ThundersError::DeserializationFailure)?,
-                    data,
-                })
+                while let Some(f) = map.next_key_seed(FieldSeed)? {
+                    match f {
+                        Field::Method => method = Some(map.next_value()?),
+                        Field::Corr => corr = Some(map.next_value()?),
+                        Field::Type => ty = Some(map.next_value()?),
+                        Field::Id => id = Some(map.next_value()?),
+                        Field::Success => success = Some(map.next_value()?),
+                        Field::Finished => finished = Some(map.next_value()?),
+                        Field::Description => description = Some(map.next_value()?),
+                        Field::Data => {
+                            let raw: &RawValue = map.next_value()?;
+                            data_bytes = Some(raw.get().as_bytes());
+                        }
+                        Field::Unknown => {
+                            let _: de::IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+
+                let method = method.ok_or_else(|| de::Error::custom("missing `method`"))?;
+                match method {
+                    CONNECT => {
+                        let success = success
+                            .ok_or_else(|| de::Error::custom("missing `success` for connect"))?;
+                        let corr =
+                            corr.ok_or_else(|| de::Error::custom("missing `correlation_id`"))?;
+                        Ok(OutputMessage::Connect {
+                            correlation_id: corr,
+                            success,
+                        })
+                    }
+                    CREATE => {
+                        let success = success
+                            .ok_or_else(|| de::Error::custom("missing `success` for connect"))?;
+                        let corr =
+                            corr.ok_or_else(|| de::Error::custom("missing `correlation_id`"))?;
+                        Ok(OutputMessage::Create {
+                            correlation_id: corr,
+                            success,
+                        })
+                    }
+                    JOIN => {
+                        let success = success
+                            .ok_or_else(|| de::Error::custom("missing `success` for connect"))?;
+                        let corr =
+                            corr.ok_or_else(|| de::Error::custom("missing `correlation_id`"))?;
+                        Ok(OutputMessage::Join {
+                            correlation_id: corr,
+                            success,
+                        })
+                    }
+                    DIFF => {
+                        let finished = finished
+                            .ok_or_else(|| de::Error::custom("missing `success` for connect"))?;
+                        let ty = ty.ok_or_else(|| de::Error::custom("missing `type`"))?;
+                        let id = id.ok_or_else(|| de::Error::custom("missing `id`"))?;
+                        let data = data_bytes.unwrap_or_default();
+                        Ok(OutputMessage::Diff {
+                            type_: ty,
+                            id,
+                            finished,
+                            data,
+                        })
+                    }
+                    GENERIC_ERROR => {
+                        let description =
+                            description.ok_or_else(|| de::Error::custom("missing `type`"))?;
+                        Ok(OutputMessage::GenericError { description })
+                    }
+                    _ => Err(de::Error::custom("unknown method")),
+                }
             }
-
-            GENERIC_ERROR => {
-                let description = json
-                    .get(DESCRIPTION)
-                    .ok_or(ThundersError::DeserializationFailure)?;
-                Ok(OutputMessage::GenericError {
-                    description: Cow::Owned(
-                        description
-                            .as_str()
-                            .ok_or(ThundersError::DeserializationFailure)?
-                            .to_string(),
-                    ),
-                })
-            }
-            &_ => Err(ThundersError::DeserializationFailure),
         }
+
+        de.deserialize_map(Root)
+            .map_err(|_| ThundersError::DeserializationFailure)
     }
 }
