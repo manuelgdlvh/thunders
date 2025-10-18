@@ -34,7 +34,7 @@ pub struct Settings {
 }
 
 impl SyncRuntime {
-    fn process_diff<H: GameHooks, S: Schema>(&self, diff: Diff<H::Delta>)
+    fn notify<H: GameHooks, S: Schema>(&self, diff: Diff<H::Delta>)
     where
         H::Delta: Serialize<S>,
     {
@@ -93,7 +93,7 @@ where
 
                 if is_finished {
                     if let Some(diff) = diff_opt {
-                        self.process_diff::<H, S>(diff);
+                        self.notify::<H, S>(diff);
                     }
 
                     let diff = DiffNotification::finish(self.type_, self.id.as_str());
@@ -113,7 +113,7 @@ where
                             if let Some(player_context) = self.players_cxt.remove(&id)
                                 && let Some(diff) = hooks.leave(player_context.as_ref())
                             {
-                                self.process_diff::<H, S>(diff);
+                                self.notify::<H, S>(diff);
                             }
 
                             continue;
@@ -123,7 +123,7 @@ where
                             self.players_cxt.insert(cxt.id(), Arc::clone(&cxt));
                             if let Some(diffs) = hooks.join(cxt.as_ref()) {
                                 for diff in diffs {
-                                    self.process_diff::<H, S>(diff);
+                                    self.notify::<H, S>(diff);
                                 }
                             }
                             continue;
@@ -142,7 +142,7 @@ where
                             if let Some(player_context) = self.players_cxt.remove(&id)
                                 && let Some(diff) = hooks.leave(player_context.as_ref())
                             {
-                                self.process_diff::<H, S>(diff);
+                                self.notify::<H, S>(diff);
                             }
                         }
 
@@ -150,7 +150,7 @@ where
                             self.players_cxt.insert(cxt.id(), Arc::clone(&cxt));
                             if let Some(diffs) = hooks.join(cxt.as_ref()) {
                                 for diff in diffs {
-                                    self.process_diff::<H, S>(diff);
+                                    self.notify::<H, S>(diff);
                                 }
                             }
                         }
@@ -164,7 +164,7 @@ where
                 }
 
                 for diff in hooks.diff(&self.players_cxt, actions_buffer.as_slice()) {
-                    self.process_diff::<H, S>(diff);
+                    self.notify::<H, S>(diff);
                 }
 
                 hooks.update(mem::take(&mut actions_buffer));
@@ -193,19 +193,19 @@ where
     fn event(&self, p_id: u64, event: Event<H>) {
         match &event {
             Event::Action(action) => {
-                println!("SERVER received action: {:?}", action);
+                log::trace!("SERVER received action request. Action: {action:?} ");
             }
             Event::Join(cxt) => {
-                println!("SERVER received join: {:?}", cxt);
+                log::trace!("SERVER received join request. PlayerContext: {cxt:?} ");
             }
 
             Event::Leave(id) => {
-                println!("SERVER received leave: {:?}", id);
+                log::trace!("SERVER received leave request. PlayerId: {id} ");
             }
         }
 
-        if let Err(_) = self.actions.send((p_id, event)) {
-            println!("Runtime Not Connected. Skipping Action.");
+        if self.actions.send((p_id, event)).is_err() {
+            log::warn!("Game runtime stopped, skipping action.");
         }
     }
 }

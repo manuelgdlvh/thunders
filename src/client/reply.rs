@@ -8,6 +8,7 @@ use tokio::sync::oneshot::{self, Receiver, Sender};
 
 pub enum Reply<R, E> {
     Ok(R),
+    OkNoResult,
     Err(E),
     Timeout,
 }
@@ -30,19 +31,16 @@ impl PartialOrd for RegisteredTimeout {
     }
 }
 
-pub struct ReplyManager<R, E> {
+pub struct ReplyManager<E, R = ()> {
     replies_registry: Mutex<HashMap<String, Sender<Reply<R, E>>>>,
     registered_timeouts: RwLock<BinaryHeap<RegisteredTimeout>>,
-    // TODO: improve this using custom wakers
-    tick_interval: tokio::time::Duration,
 }
 
-impl<R, E> ReplyManager<R, E> {
-    pub fn new(tick_interval: tokio::time::Duration) -> Self {
+impl<R, E> ReplyManager<E, R> {
+    pub fn new() -> Self {
         Self {
             replies_registry: Mutex::new(HashMap::new()),
             registered_timeouts: RwLock::new(BinaryHeap::new()),
-            tick_interval,
         }
     }
 
@@ -67,13 +65,34 @@ impl<R, E> ReplyManager<R, E> {
     }
 
     pub fn ok(&self, id: &str, result: R) {
-        if let Some(pending_reply) = self.replies_registry.lock().expect("").remove(id) {
+        if let Some(pending_reply) = self
+            .replies_registry
+            .lock()
+            .expect("Should always lock be acquired")
+            .remove(id)
+        {
             let _ = pending_reply.send(Reply::Ok(result));
         }
     }
 
+    pub fn ok_no_result(&self, id: &str) {
+        if let Some(pending_reply) = self
+            .replies_registry
+            .lock()
+            .expect("Should always lock be acquired")
+            .remove(id)
+        {
+            let _ = pending_reply.send(Reply::OkNoResult);
+        }
+    }
+
     pub fn error(&self, id: &str, error: E) {
-        if let Some(pending_reply) = self.replies_registry.lock().expect("").remove(id) {
+        if let Some(pending_reply) = self
+            .replies_registry
+            .lock()
+            .expect("Should always lock be acquired")
+            .remove(id)
+        {
             let _ = pending_reply.send(Reply::Err(error));
         }
     }
@@ -84,7 +103,7 @@ impl<R, E> ReplyManager<R, E> {
             if let Some(registered_timeout) = self
                 .registered_timeouts
                 .read()
-                .expect("Should read lock always be acquirable")
+                .expect("Should read lock always be acquired")
                 .peek()
             {
                 if now < registered_timeout.expires_at {
@@ -104,7 +123,7 @@ impl<R, E> ReplyManager<R, E> {
             if let Some(pending_reply) = self
                 .replies_registry
                 .lock()
-                .expect("")
+                .expect("Should always lock be acquired")
                 .remove(&registered_timeout.id)
             {
                 let _ = pending_reply.send(Reply::Timeout);

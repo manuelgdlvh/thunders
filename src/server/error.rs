@@ -18,8 +18,6 @@ pub enum ThundersServerError {
     RoomNotFound,
     RoomAlreadyCreated,
     RoomTypeNotFound,
-    ConnectionFailure,
-    InvalidInput,
     DeserializationFailure,
 }
 

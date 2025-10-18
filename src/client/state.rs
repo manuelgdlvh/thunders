@@ -1,19 +1,18 @@
-use std::{any::Any, collections::HashMap, sync::RwLock};
+use std::{any::Any, collections::HashMap, fmt::Debug, sync::RwLock};
 
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
     api::schema::{Deserialize, Schema},
-    client::error::ThundersClientError,
+    client::{ThundersClientResult, error::ThundersClientError},
 };
 
 pub trait GameState {
-    type Change: std::fmt::Debug;
+    type Change: Debug;
     type Action;
     type Options: Default;
 
     fn build(options: &Self::Options) -> Self;
-
     fn on_change(&mut self, change: Self::Change);
     fn on_action(&mut self, action: Self::Action);
     fn on_finish(self);
@@ -33,8 +32,9 @@ where
 impl<S, T> GenericGameState<S> for T
 where
     S: Schema,
-    T: GameState + 'static,
-    T::Change: for<'a> Deserialize<'a, S> + std::fmt::Debug,
+    T: GameState,
+    T::Action: 'static,
+    T::Change: for<'a> Deserialize<'a, S> + Debug,
 {
     fn on_change(&mut self, change: &[u8]) -> Result<(), ThundersClientError> {
         if let Ok(change) = <T::Change as Deserialize<S>>::deserialize(change) {
@@ -58,18 +58,14 @@ where
     }
 }
 
+pub type GenericGameStateEntry<S> = Box<dyn GenericGameState<S> + Send + Sync>;
+
 pub struct ActiveGames<S: Schema> {
-    pub current:
-        HashMap<&'static str, RwLock<HashMap<String, Box<dyn GenericGameState<S> + Send + Sync>>>>,
+    pub current: HashMap<&'static str, RwLock<HashMap<String, GenericGameStateEntry<S>>>>,
 }
 
 impl<S: Schema> ActiveGames<S> {
-    pub fn route_message(
-        &self,
-        type_: &str,
-        id: &str,
-        message: &[u8],
-    ) -> Result<(), ThundersClientError> {
+    pub fn route_message(&self, type_: &str, id: &str, message: &[u8]) -> ThundersClientResult {
         self.current
             .get(type_)
             .ok_or(ThundersClientError::RoomTypeNotFound)?
@@ -86,7 +82,7 @@ impl<S: Schema> ActiveGames<S> {
         type_: &'static str,
         id: String,
         game: G,
-    ) -> Result<(), ThundersClientError>
+    ) -> ThundersClientResult
     where
         G::Change: for<'a> Deserialize<'a, S>,
     {
@@ -95,10 +91,7 @@ impl<S: Schema> ActiveGames<S> {
             .ok_or(ThundersClientError::RoomTypeNotFound)?
             .write()
             .expect("Should always get write lock successfully")
-            .insert(
-                id,
-                Box::new(game) as Box<dyn GenericGameState<S> + Send + Sync>,
-            );
+            .insert(id, Box::new(game) as GenericGameStateEntry<S>);
 
         Ok(())
     }
@@ -108,7 +101,7 @@ impl<S: Schema> ActiveGames<S> {
         type_: &'static str,
         id: &str,
         action: G::Action,
-    ) -> Result<(), ThundersClientError> {
+    ) -> ThundersClientResult {
         self.current
             .get(type_)
             .ok_or(ThundersClientError::RoomTypeNotFound)?
@@ -123,7 +116,7 @@ impl<S: Schema> ActiveGames<S> {
         &self,
         type_: &str,
         id: &str,
-    ) -> Result<Box<dyn GenericGameState<S> + Send + Sync>, ThundersClientError> {
+    ) -> Result<GenericGameStateEntry<S>, ThundersClientError> {
         self.current
             .get(type_)
             .ok_or(ThundersClientError::RoomTypeNotFound)?

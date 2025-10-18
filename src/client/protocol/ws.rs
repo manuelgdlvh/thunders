@@ -1,5 +1,5 @@
 use futures::{SinkExt, StreamExt};
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::Arc;
 
 use tokio_tungstenite::{
     connect_async,
@@ -45,38 +45,30 @@ impl ClientProtocol for WebSocketClientProtocol {
             .await
             .map_err(|_| ThundersClientError::ConnectionFailure)?;
 
-        let (in_action_tx, mut in_action_rx) =
-            tokio::sync::mpsc::unbounded_channel::<InboundAction>();
+        let (action_tx, mut action_rx) = tokio::sync::mpsc::unbounded_channel::<InboundAction>();
         let (mut ws_writer, mut ws_receiver) = stream.split();
 
-        let running = Arc::new(AtomicBool::new(true));
-        let reply_manager = Arc::new(ReplyManager::new(tokio::time::Duration::from_secs(5)));
+        let reply_manager = Arc::new(ReplyManager::new());
 
         tokio::spawn({
-            let running = Arc::clone(&running);
             let reply_manager = Arc::clone(&reply_manager);
             async move {
-                let running = Arc::clone(&running);
-
                 let mut vacuum_interval = tokio::time::interval(std::time::Duration::from_secs(60));
                 loop {
-                    // Add stop in Drop for client
                     tokio::select! {
                          _ = vacuum_interval.tick() => {
                             reply_manager.vacuum();
                          },
-                         Some(inbound_action) = in_action_rx.recv() => {
+                         Some(inbound_action) = action_rx.recv() => {
                              match inbound_action {
                                  InboundAction::Raw(data) => {
                             if let Err(_) = ws_writer
                                  .send(Message::Binary(data.into()))
                                  .await {
-                                     running.swap(false, std::sync::atomic::Ordering::Release);
                                      break;
                                 }
                              }
                                  InboundAction::Stop => {
-                                     running.swap(false, std::sync::atomic::Ordering::Release);
                                      break;
                                  }
                              }
@@ -88,54 +80,50 @@ impl ClientProtocol for WebSocketClientProtocol {
                                            match output {
                                                 OutputMessage::Connect{correlation_id, success} => {
                                                     if success {
-                                                        reply_manager.ok(correlation_id, ());
-                                                    }else {
+                                                        reply_manager.ok_no_result(correlation_id );
+                                                    } else {
                                                         reply_manager.error(correlation_id, ThundersClientError::ConnectionFailure);
                                                     }
                                                },
                                                OutputMessage::Join{correlation_id, success} => {
                                                     if success {
-                                                        reply_manager.ok(correlation_id, ());
-                                                    }else {
+                                                        reply_manager.ok_no_result(correlation_id );
+                                                    } else {
                                                         reply_manager.error(correlation_id, ThundersClientError::GameJoinFailure);
                                                     }
                                               },
                                                OutputMessage::Create{correlation_id, success} => {
                                                     if success {
-                                                        reply_manager.ok(correlation_id, ());
-                                                    }else {
+                                                        reply_manager.ok_no_result(correlation_id);
+                                                    } else {
                                                         reply_manager.error(correlation_id, ThundersClientError::GameCreationFailure);
                                                     }
                                                }
                                               OutputMessage::Diff{type_, id, finished, data} => {
-
-
-                                                  if finished {
+                                                 if finished {
                                                       if let Ok(room) = active_games.remove(type_.as_ref(), id.as_ref()) {
                                                           room.on_finished();
                                                       }
-                                                 } else if let Err(err) = active_games.route_message(type_.as_ref(), id.as_ref(), data){
-                                                        println!("{:?}", err);
+                                                } else if let Err(err) = active_games.route_message(type_.as_ref(), id.as_ref(), data) {
+                                                     log::error!("Message routing failed. Type: {}, Id: {}, Error: {err:?}", type_, id);
                                                   }
                                                }
                                                OutputMessage::GenericError {description} => {
-                                                   println!("CLIENT recevied error. {}", description);
+                                                   log::error!("Received error message. Description: {description}");
                                                }
                                         }
                             } else {
-                                println!("Ignored message");
+                                log::error!("Ignored message due to serialization failure");
                              }
                          },
-
                     }
                 }
             }
         });
 
         Ok(ClientProtocolHandle {
-            sender: in_action_tx,
+            action_tx,
             reply_manager,
-            running,
         })
     }
 }

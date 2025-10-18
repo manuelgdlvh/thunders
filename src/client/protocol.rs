@@ -1,4 +1,4 @@
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::Arc;
 
 use crate::client::reply::ReplyManager;
 use crate::{
@@ -17,9 +17,8 @@ use tokio::sync::mpsc::UnboundedSender;
 pub mod ws;
 
 pub struct ClientProtocolHandle {
-    pub sender: UnboundedSender<InboundAction>,
-    pub reply_manager: Arc<ReplyManager<(), ThundersClientError>>,
-    pub running: Arc<AtomicBool>,
+    pub(crate) action_tx: UnboundedSender<InboundAction>,
+    pub(crate) reply_manager: Arc<ReplyManager<ThundersClientError>>,
 }
 
 pub trait ClientProtocol {

@@ -4,9 +4,13 @@ use std::{
     time::Duration,
 };
 
+use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use crate::{api::schema::BorrowedSerialize, client::reply::Reply};
+use crate::{
+    api::schema::BorrowedSerialize,
+    client::reply::{Reply, ReplyManager},
+};
 use crate::{
     api::{
         message::{InputMessage, OutputMessage},
@@ -14,7 +18,7 @@ use crate::{
     },
     client::{
         error::ThundersClientError,
-        protocol::{ClientProtocol, ClientProtocolHandle},
+        protocol::ClientProtocol,
         state::{ActiveGames, GameState, InboundAction},
     },
 };
@@ -23,6 +27,8 @@ pub mod error;
 pub mod protocol;
 mod reply;
 pub mod state;
+
+pub type ThundersClientResult = Result<(), ThundersClientError>;
 
 pub struct ThundersClientBuilder<P, S>
 where
@@ -64,26 +70,23 @@ where
         let p_handle = self.protocol.run(Arc::clone(&self.active_games)).await?;
 
         Ok(ThundersClient::<S> {
-            p_handle,
+            action_tx: p_handle.action_tx,
+            reply_manager: p_handle.reply_manager,
             active_games: self.active_games,
         })
     }
 }
 
 pub struct ThundersClient<S: Schema> {
-    p_handle: ClientProtocolHandle,
+    action_tx: UnboundedSender<InboundAction>,
+    reply_manager: Arc<ReplyManager<ThundersClientError>>,
     active_games: Arc<ActiveGames<S>>,
 }
 
 impl<S: Schema + 'static> ThundersClient<S> {
-    pub async fn connect(
-        &mut self,
-        player_id: u64,
-        expires_in: Duration,
-    ) -> Result<(), ThundersClientError> {
+    pub async fn connect(&self, player_id: u64, expires_in: Duration) -> ThundersClientResult {
         let correlation_id = Uuid::new_v4().to_string();
         let reply = self
-            .p_handle
             .reply_manager
             .register(correlation_id.as_str(), expires_in);
 
@@ -109,7 +112,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
         id: &str,
         options: G::Options,
         expires_in: Duration,
-    ) -> Result<(), ThundersClientError>
+    ) -> ThundersClientResult
     where
         G::Change: for<'a> Deserialize<'a, S>,
         G::Options: Serialize<S>,
@@ -119,7 +122,6 @@ impl<S: Schema + 'static> ThundersClient<S> {
 
         let correlation_id = Uuid::new_v4().to_string();
         let reply = self
-            .p_handle
             .reply_manager
             .register(correlation_id.as_str(), expires_in);
 
@@ -132,7 +134,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
 
         self.try_send(InputMessage::Create {
             correlation_id: correlation_id.as_str(),
-            type_: type_,
+            type_,
             id,
             options,
         });
@@ -151,6 +153,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
             Err(ThundersClientError::NoResponse)
         };
 
+        //TODO: Send cancellation
         if should_rollback {
             self.active_games.remove(type_, id)?;
         }
@@ -163,7 +166,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
         type_: &'static str,
         id: &str,
         expires_in: Duration,
-    ) -> Result<(), ThundersClientError>
+    ) -> ThundersClientResult
     where
         G::Change: for<'a> Deserialize<'a, S>,
     {
@@ -172,7 +175,6 @@ impl<S: Schema + 'static> ThundersClient<S> {
 
         let correlation_id = Uuid::new_v4().to_string();
         let reply = self
-            .p_handle
             .reply_manager
             .register(correlation_id.as_str(), expires_in);
 
@@ -195,6 +197,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
             Err(ThundersClientError::NoResponse)
         };
 
+        // TODO: Send cancellation
         if should_rollback {
             self.active_games.remove(type_, id)?;
         }
@@ -207,7 +210,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
         type_: &'static str,
         id: &str,
         action: G::Action,
-    ) -> Result<(), ThundersClientError>
+    ) -> ThundersClientResult
     where
         G::Action: BorrowedSerialize<S>,
     {
@@ -221,10 +224,9 @@ impl<S: Schema + 'static> ThundersClient<S> {
     }
 
     fn try_send(&self, message: InputMessage) {
-        self.p_handle
-            .sender
+        self.action_tx
             .send(InboundAction::Raw(message.serialize()))
-            .unwrap();
+            .expect("Should always be consumer active if client handle alive");
     }
 }
 
@@ -233,6 +235,8 @@ where
     S: Schema,
 {
     fn drop(&mut self) {
-        self.p_handle.sender.send(InboundAction::Stop).unwrap();
+        self.action_tx
+            .send(InboundAction::Stop)
+            .expect("Should always be consumer active if client handle alive");
     }
 }

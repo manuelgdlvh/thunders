@@ -204,8 +204,10 @@ impl GameHooks for Chat {
         None
     }
 
-    fn join(&self, _player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>> {
-        None
+    fn join(&self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>> {
+        Some(vec![Diff::All {
+            delta: ChatDiff::ConnectedUser(player_cxt.id()),
+        }])
     }
 
     fn finish(&self) -> (bool, Option<Diff<Self::Delta>>) {
@@ -237,5 +239,6 @@ pub struct ChatMessage {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum ChatDiff {
     MessagesAdded { messages: Vec<ChatMessage> },
+    ConnectedUser(u64),
     ChatClosed,
 }
