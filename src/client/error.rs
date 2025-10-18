@@ -8,4 +8,5 @@ pub enum ThundersClientError {
     IncompatibleAction,
     GameJoinFailure,
     GameCreationFailure,
+    EventListenerNotConfigured,
 }

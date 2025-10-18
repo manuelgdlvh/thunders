@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::client::InternalEvent;
 use crate::client::reply::ReplyManager;
 use crate::{
     api::{
@@ -18,6 +19,7 @@ pub mod ws;
 
 pub struct ClientProtocolHandle {
     pub(crate) action_tx: UnboundedSender<InboundAction>,
+    pub(crate) event_rx: async_channel::Receiver<InternalEvent>,
     pub(crate) reply_manager: Arc<ReplyManager<ThundersClientError>>,
 }
 

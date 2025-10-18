@@ -1,10 +1,11 @@
 use std::{
     collections::HashMap,
+    fmt::Debug,
     sync::{Arc, RwLock},
     time::Duration,
 };
 
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;
 
 use crate::{
@@ -71,6 +72,7 @@ where
 
         Ok(ThundersClient::<S> {
             action_tx: p_handle.action_tx,
+            event_rx: p_handle.event_rx,
             reply_manager: p_handle.reply_manager,
             active_games: self.active_games,
         })
@@ -79,8 +81,22 @@ where
 
 pub struct ThundersClient<S: Schema> {
     action_tx: UnboundedSender<InboundAction>,
+    event_rx: async_channel::Receiver<InternalEvent>,
     reply_manager: Arc<ReplyManager<ThundersClientError>>,
-    active_games: Arc<ActiveGames<S>>,
+    pub active_games: Arc<ActiveGames<S>>,
+}
+
+impl<S> Debug for ThundersClient<S>
+where
+    S: Schema,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Result::Ok(())
+    }
+}
+
+pub enum InternalEvent {
+    RoomUpdated { type_: String, id: String },
 }
 
 impl<S: Schema + 'static> ThundersClient<S> {
@@ -221,6 +237,13 @@ impl<S: Schema + 'static> ThundersClient<S> {
         });
 
         self.active_games.action::<G>(type_, id, action)
+    }
+
+    pub async fn consume_event(&self) -> Result<InternalEvent, ThundersClientError> {
+        self.event_rx
+            .recv()
+            .await
+            .map_err(|_| ThundersClientError::EventListenerNotConfigured)
     }
 
     fn try_send(&self, message: InputMessage) {

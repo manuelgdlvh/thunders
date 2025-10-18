@@ -1,4 +1,10 @@
-use std::{any::Any, collections::HashMap, fmt::Debug, sync::RwLock};
+use std::{
+    any::Any,
+    collections::HashMap,
+    fmt::Debug,
+    marker::PhantomData,
+    sync::{RwLock, RwLockReadGuard},
+};
 
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -26,13 +32,15 @@ where
 
     fn on_action(&mut self, action: Box<dyn Any>) -> Result<(), ThundersClientError>;
 
+    fn as_any(&self) -> &dyn Any;
+
     fn on_finished(self: Box<Self>);
 }
 
 impl<S, T> GenericGameState<S> for T
 where
     S: Schema,
-    T: GameState,
+    T: GameState + 'static,
     T::Action: 'static,
     T::Change: for<'a> Deserialize<'a, S> + Debug,
 {
@@ -53,6 +61,10 @@ where
             Err(ThundersClientError::IncompatibleAction)
         }
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
     fn on_finished(self: Box<Self>) {
         self.on_finish();
     }
@@ -62,6 +74,31 @@ pub type GenericGameStateEntry<S> = Box<dyn GenericGameState<S> + Send + Sync>;
 
 pub struct ActiveGames<S: Schema> {
     pub current: HashMap<&'static str, RwLock<HashMap<String, GenericGameStateEntry<S>>>>,
+}
+
+pub struct GameStateView<'a, G, S>
+where
+    G: GameState + 'static,
+    S: Schema,
+{
+    guard: RwLockReadGuard<'a, HashMap<String, GenericGameStateEntry<S>>>,
+    id: String,
+    _marker: PhantomData<G>,
+}
+
+impl<'a, G, S> GameStateView<'a, G, S>
+where
+    G: GameState,
+    S: Schema,
+{
+    pub fn get(&self) -> &G {
+        self.guard
+            .get(self.id.as_str())
+            .unwrap()
+            .as_any()
+            .downcast_ref::<G>()
+            .unwrap()
+    }
 }
 
 impl<S: Schema> ActiveGames<S> {
@@ -75,6 +112,29 @@ impl<S: Schema> ActiveGames<S> {
             .ok_or(ThundersClientError::RoomNotFound)?
             .as_mut()
             .on_change(message)
+    }
+
+    pub fn get_as<G: GameState + Send + Sync + 'static>(
+        &self,
+        type_: &'static str,
+        id: &str,
+    ) -> Result<Option<GameStateView<'_, G, S>>, ThundersClientError> {
+        let guard = self
+            .current
+            .get(type_)
+            .ok_or(ThundersClientError::RoomTypeNotFound)?
+            .read()
+            .expect("Should always get write lock successfully");
+
+        if guard.contains_key(id) {
+            Ok(Some(GameStateView {
+                guard,
+                id: id.to_string(),
+                _marker: PhantomData::<G>::default(),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn create<G: GameState + Send + Sync + 'static>(

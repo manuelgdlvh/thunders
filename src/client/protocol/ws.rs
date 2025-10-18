@@ -6,7 +6,7 @@ use tokio_tungstenite::{
     tungstenite::{Bytes, Message, client::IntoClientRequest},
 };
 
-use crate::client::reply::ReplyManager;
+use crate::client::{InternalEvent, reply::ReplyManager};
 use crate::{
     api::{
         message::OutputMessage,
@@ -46,6 +46,7 @@ impl ClientProtocol for WebSocketClientProtocol {
             .map_err(|_| ThundersClientError::ConnectionFailure)?;
 
         let (action_tx, mut action_rx) = tokio::sync::mpsc::unbounded_channel::<InboundAction>();
+        let (event_tx, mut event_rx) = async_channel::unbounded::<InternalEvent>();
         let (mut ws_writer, mut ws_receiver) = stream.split();
 
         let reply_manager = Arc::new(ReplyManager::new());
@@ -106,8 +107,11 @@ impl ClientProtocol for WebSocketClientProtocol {
                                                       }
                                                 } else if let Err(err) = active_games.route_message(type_.as_ref(), id.as_ref(), data) {
                                                      log::error!("Message routing failed. Type: {}, Id: {}, Error: {err:?}", type_, id);
-                                                  }
+                                                } else {
+                                                    let _ = event_tx.send(InternalEvent::RoomUpdated { type_: type_.to_string(), id: id.to_string() } ).await;
                                                }
+
+                                           }
                                                OutputMessage::GenericError {description} => {
                                                    log::error!("Received error message. Description: {description}");
                                                }
@@ -123,6 +127,7 @@ impl ClientProtocol for WebSocketClientProtocol {
 
         Ok(ClientProtocolHandle {
             action_tx,
+            event_rx,
             reply_manager,
         })
     }
