@@ -3,8 +3,7 @@ use std::time::Duration;
 
 use futures::channel::mpsc::Sender;
 use futures::{SinkExt, Stream};
-use iced::widget::row;
-use iced::widget::text::LineHeight;
+use iced::widget::text_editor;
 use iced::{Alignment, Element, Length, Subscription, Task, stream};
 use rand::RngCore;
 use thunders::api::schema::json::Json;
@@ -26,13 +25,14 @@ fn main() {
 #[derive(Default)]
 pub struct Application {
     client: Option<Arc<ThundersClient<Json>>>,
+    active: text_editor::Content,
 }
 
 #[derive(Debug, Clone)]
 pub enum Event {
     ClientJoined,
     Connected(Arc<ThundersClient<Json>>),
-    TextModified(String),
+    TextModified(text_editor::Action),
     CreationRequested,
     JoinRequested,
     Updated,
@@ -84,52 +84,75 @@ impl Application {
                 }
             }),
 
-            Event::TextModified(text) => {
-                if let Some(client) = self.client.as_ref() {
+            Event::TextModified(action) => {
+                let should_sync = match action {
+                    text_editor::Action::Edit(_) => true,
+                    _ => false,
+                };
+
+                self.active.perform(action);
+
+                if should_sync && let Some(client) = self.client.as_ref() {
                     let _ = client.action::<TextEditor>(
                         LOBBY_TYPE,
                         LOBBY_ID,
-                        TextEditorAction::TextReplace(text),
+                        TextEditorAction::TextReplace(self.active.text()),
                     );
-                } else {
-                    panic!()
                 }
 
                 Task::none()
             }
 
-            Event::ClientJoined | Event::Updated | Event::Created | Event::Joined => Task::none(),
+            Event::Updated => {
+                let client_ref = self.client.as_ref().expect("");
+                let state_view_opt = client_ref
+                    .active_games
+                    .get_as::<TextEditor>(LOBBY_TYPE, LOBBY_ID)
+                    .expect("Should room type exists always in this typed example");
+
+                if let Some(view) = state_view_opt {
+                    self.active = text_editor::Content::with_text(&view.as_ref().raw_text);
+                }
+
+                Task::none()
+            }
+            Event::ClientJoined | Event::Created | Event::Joined => Task::none(),
         }
     }
 
     pub fn view(&self) -> Element<'_, Event> {
-        if let Some(client) = self.client.as_ref() {
-            let state_view_opt = client
-                .active_games
-                .get_as::<TextEditor>(LOBBY_TYPE, LOBBY_ID)
-                .expect("Should room type exists always in this typed example");
+        if self.client.is_some() {
+            let create_btn = iced::widget::button("Create")
+                .padding(10)
+                .on_press(Event::CreationRequested);
+            let join_btn = iced::widget::button("Join")
+                .padding(10)
+                .on_press(Event::JoinRequested);
 
-            let text_input = if let Some(view) = state_view_opt {
-                iced::widget::text_input("", view.as_ref().content.as_str())
-                    .line_height(LineHeight::Relative(5.0))
-                    .on_input(|text| Event::TextModified(text))
-            } else {
-                iced::widget::text_input("", "Please create or join to room")
-                    .line_height(LineHeight::Relative(5.0))
-            };
-
-            let create_btn = iced::widget::button("Create").on_press(Event::CreationRequested);
-            let join_btn = iced::widget::button("Join").on_press(Event::JoinRequested);
+            let text_editor = iced::widget::text_editor(&self.active)
+                .on_action(Event::TextModified)
+                .height(Length::Fill)
+                .placeholder("Create, Join or Start typing");
 
             iced::widget::column!(
-                iced::widget::row![create_btn, join_btn].spacing(10),
-                text_input
+                iced::widget::row![create_btn, join_btn]
+                    .width(Length::Fill)
+                    .spacing(25),
+                text_editor
             )
+            .spacing(15)
+            .padding(10)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
         } else {
-            iced::widget::text_input("Not Connected :(", "").into()
+            iced::widget::text!("Not Connected :(")
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .size(36)
+                .align_x(Alignment::Center)
+                .align_y(Alignment::Center)
+                .into()
         }
     }
 
@@ -165,7 +188,7 @@ impl Application {
 // Thunders
 
 pub struct TextEditor {
-    content: String,
+    raw_text: String,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -185,14 +208,14 @@ impl GameState for TextEditor {
 
     fn build(_options: &Self::Options) -> Self {
         Self {
-            content: Default::default(),
+            raw_text: Default::default(),
         }
     }
 
     fn on_change(&mut self, change: Self::Change) {
         match change {
             Self::Change::Full(text) => {
-                self.content.replace_range(.., text.as_str());
+                self.raw_text = text;
             }
         }
     }
@@ -200,7 +223,7 @@ impl GameState for TextEditor {
     fn on_action(&mut self, action: Self::Action) {
         match action {
             Self::Action::TextReplace(text) => {
-                self.content.replace_range(.., text.as_str());
+                self.raw_text = text;
             }
         }
     }
