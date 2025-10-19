@@ -4,7 +4,8 @@ use std::time::Duration;
 use futures::channel::mpsc::Sender;
 use futures::{SinkExt, Stream};
 use iced::widget::row;
-use iced::{Element, Subscription, Task, stream};
+use iced::widget::text::LineHeight;
+use iced::{Alignment, Element, Length, Subscription, Task, stream};
 use rand::RngCore;
 use thunders::api::schema::json::Json;
 use thunders::client::protocol::ws::WebSocketClientProtocol;
@@ -103,34 +104,41 @@ impl Application {
 
     pub fn view(&self) -> Element<'_, Event> {
         if let Some(client) = self.client.as_ref() {
-            let view = client
+            let state_view_opt = client
                 .active_games
-                .get_as::<TextEditor>(LOBBY_TYPE, LOBBY_ID);
-            let game_state = view.expect("Should room type exists always in this typed example");
+                .get_as::<TextEditor>(LOBBY_TYPE, LOBBY_ID)
+                .expect("Should room type exists always in this typed example");
 
-            let text_input = if let Some(view) = game_state {
-                iced::widget::text_input("Connected :) ", &view.get().content)
+            let text_input = if let Some(view) = state_view_opt {
+                iced::widget::text_input("", view.as_ref().content.as_str())
+                    .line_height(LineHeight::Relative(5.0))
                     .on_input(|text| Event::TextModified(text))
             } else {
-                iced::widget::text_input("Connected :) ", "Please create or join to room")
-                    .on_input(|text| Event::TextModified(text))
+                iced::widget::text_input("", "Please create or join to room")
+                    .line_height(LineHeight::Relative(5.0))
             };
 
             let create_btn = iced::widget::button("Create").on_press(Event::CreationRequested);
             let join_btn = iced::widget::button("Join").on_press(Event::JoinRequested);
 
-            iced::widget::column!(iced::widget::row![create_btn, join_btn], text_input).into()
+            iced::widget::column!(
+                iced::widget::row![create_btn, join_btn].spacing(10),
+                text_input
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
         } else {
             iced::widget::text_input("Not Connected :(", "").into()
         }
     }
 
-    fn some_worker() -> impl Stream<Item = Event> {
+    fn listener() -> impl Stream<Item = Event> {
         let mut rng = rand::thread_rng();
         let id: u64 = rng.next_u64();
         stream::channel(100, move |mut output: Sender<Event>| async move {
             let client = ThundersClientBuilder::new(
-                WebSocketClientProtocol::new(IP_ADDRESS.to_string(), 8080),
+                WebSocketClientProtocol::new(IP_ADDRESS, 8080),
                 Json::default(),
             )
             .register(LOBBY_TYPE)
@@ -141,16 +149,16 @@ impl Application {
             client.connect(id, Duration::from_secs(5)).await.unwrap();
 
             let client = Arc::new(client);
-            output.send(Event::Connected(Arc::clone(&client))).await;
+            let _ = output.send(Event::Connected(Arc::clone(&client))).await;
 
             while let Ok(_) = client.consume_event().await {
-                output.send(Event::Updated).await;
+                let _ = output.send(Event::Updated).await;
             }
         })
     }
 
     pub fn subscription(&self) -> Subscription<Event> {
-        Subscription::run(Self::some_worker)
+        Subscription::run(Self::listener)
     }
 }
 

@@ -25,8 +25,11 @@ pub struct WebSocketClientProtocol {
 }
 
 impl WebSocketClientProtocol {
-    pub fn new(addr: String, port: u16) -> Self {
-        Self { addr, port }
+    pub fn new(addr: impl Into<String>, port: u16) -> Self {
+        Self {
+            addr: addr.into(),
+            port,
+        }
     }
 }
 impl ClientProtocol for WebSocketClientProtocol {

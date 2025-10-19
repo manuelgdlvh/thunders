@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     marker::PhantomData,
+    ops::Deref,
     sync::{RwLock, RwLockReadGuard},
 };
 
@@ -86,12 +87,12 @@ where
     _marker: PhantomData<G>,
 }
 
-impl<'a, G, S> GameStateView<'a, G, S>
+impl<'a, G, S> AsRef<G> for GameStateView<'a, G, S>
 where
     G: GameState,
     S: Schema,
 {
-    pub fn get(&self) -> &G {
+    fn as_ref(&self) -> &G {
         self.guard
             .get(self.id.as_str())
             .unwrap()
