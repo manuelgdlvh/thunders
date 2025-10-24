@@ -31,6 +31,7 @@ where
     fn build(
         type_: &'static str,
         id: String,
+        host_id: u64,
         settings: &Self::Settings,
         session_manager: Arc<SessionManager>,
     ) -> Self;
@@ -89,6 +90,7 @@ where
         let runtime = R::build(
             self.type_,
             room_id.clone(),
+            cxt.id(),
             &self.settings,
             Arc::clone(&self.session_manager),
         );

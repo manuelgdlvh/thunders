@@ -22,6 +22,7 @@ use crate::{
 pub struct SyncRuntime {
     type_: &'static str,
     id: String,
+    host_id: u64,
     action_timeout: Duration,
     tick: Duration,
     session_manager: Arc<SessionManager>,
@@ -67,12 +68,14 @@ where
     fn build(
         type_: &'static str,
         id: String,
+        host_id: u64,
         settings: &Self::Settings,
         session_manager: Arc<SessionManager>,
     ) -> Self {
         Self {
             id,
             type_,
+            host_id,
             action_timeout: Duration::from_millis(settings.max_action_await_millis),
             tick: Duration::from_millis(settings.tick_interval_millis),
             session_manager,
@@ -81,7 +84,7 @@ where
     }
 
     fn start(mut self, options: <H as GameHooks>::Options) -> Self::Handle {
-        let mut hooks = H::build(options);
+        let mut hooks = H::build(self.host_id, options);
         let (actions_tx, actions_rx) = mpsc::channel::<(u64, Event<H>)>();
         let r_handle = thread::spawn(move || {
             let mut actions_buffer = Vec::new();
@@ -130,6 +133,11 @@ where
                         }
                     }
                 } else {
+                    if let Some(diffs) = hooks.tick(&self.players_cxt, vec![]) {
+                        for diff in diffs {
+                            self.notify::<H, S>(diff);
+                        }
+                    }
                     continue;
                 }
 
@@ -163,11 +171,11 @@ where
                     }
                 }
 
-                for diff in hooks.diff(&self.players_cxt, actions_buffer.as_slice()) {
-                    self.notify::<H, S>(diff);
+                if let Some(diffs) = hooks.tick(&self.players_cxt, mem::take(&mut actions_buffer)) {
+                    for diff in diffs {
+                        self.notify::<H, S>(diff);
+                    }
                 }
-
-                hooks.update(mem::take(&mut actions_buffer));
             }
         });
 

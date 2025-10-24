@@ -7,16 +7,16 @@ pub trait GameHooks: Send + 'static {
     type Action: Send + std::fmt::Debug;
     type Options: Default + std::fmt::Debug;
 
-    fn build(options: Self::Options) -> Self;
-    fn diff(
-        &self,
-        player_cxts: &HashMap<u64, Arc<PlayerContext>>,
-        actions: &[(u64, Self::Action)],
-    ) -> Vec<Diff<Self::Delta>>;
+    fn build(host_id: u64, options: Self::Options) -> Self;
 
-    fn join(&self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>>;
-    fn leave(&self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>>;
-    fn update(&mut self, actions: Vec<(u64, Self::Action)>);
+    fn tick(
+        &mut self,
+        player_cxts: &HashMap<u64, Arc<PlayerContext>>,
+        actions: Vec<(u64, Self::Action)>,
+    ) -> Option<Vec<Diff<Self::Delta>>>;
+
+    fn join(&mut self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>>;
+    fn leave(&mut self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>>;
     fn finish(&self) -> (bool, Option<Diff<Self::Delta>>);
 }
 
