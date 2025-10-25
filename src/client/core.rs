@@ -3,18 +3,15 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     marker::PhantomData,
-    ops::Deref,
     sync::{RwLock, RwLockReadGuard},
 };
-
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
     api::schema::{Deserialize, Schema},
     client::{ThundersClientResult, error::ThundersClientError},
 };
 
-pub trait GameState {
+pub trait GameHooks {
     type Change: Debug;
     type Action;
     type Options: Default;
@@ -25,7 +22,7 @@ pub trait GameState {
     fn on_finish(self);
 }
 
-pub trait GenericGameState<S>
+pub trait GenericGameHooks<S>
 where
     S: Schema,
 {
@@ -38,10 +35,10 @@ where
     fn on_finished(self: Box<Self>);
 }
 
-impl<S, T> GenericGameState<S> for T
+impl<S, T> GenericGameHooks<S> for T
 where
     S: Schema,
-    T: GameState + 'static,
+    T: GameHooks + 'static,
     T::Action: 'static,
     T::Change: for<'a> Deserialize<'a, S> + Debug,
 {
@@ -71,7 +68,7 @@ where
     }
 }
 
-pub type GenericGameStateEntry<S> = Box<dyn GenericGameState<S> + Send + Sync>;
+pub type GenericGameStateEntry<S> = Box<dyn GenericGameHooks<S> + Send + Sync>;
 
 pub struct ActiveGames<S: Schema> {
     pub current: HashMap<&'static str, RwLock<HashMap<String, GenericGameStateEntry<S>>>>,
@@ -79,7 +76,7 @@ pub struct ActiveGames<S: Schema> {
 
 pub struct GameStateView<'a, G, S>
 where
-    G: GameState + 'static,
+    G: GameHooks + 'static,
     S: Schema,
 {
     guard: RwLockReadGuard<'a, HashMap<String, GenericGameStateEntry<S>>>,
@@ -89,7 +86,7 @@ where
 
 impl<'a, G, S> AsRef<G> for GameStateView<'a, G, S>
 where
-    G: GameState,
+    G: GameHooks,
     S: Schema,
 {
     fn as_ref(&self) -> &G {
@@ -115,7 +112,7 @@ impl<S: Schema> ActiveGames<S> {
             .on_change(message)
     }
 
-    pub fn get_as<G: GameState + Send + Sync + 'static>(
+    pub fn get_as<G: GameHooks + Send + Sync + 'static>(
         &self,
         type_: &'static str,
         id: &str,
@@ -131,14 +128,14 @@ impl<S: Schema> ActiveGames<S> {
             Ok(Some(GameStateView {
                 guard,
                 id: id.to_string(),
-                _marker: PhantomData::<G>::default(),
+                _marker: PhantomData::default(),
             }))
         } else {
             Ok(None)
         }
     }
 
-    pub fn create<G: GameState + Send + Sync + 'static>(
+    pub fn create<G: GameHooks + Send + Sync + 'static>(
         &self,
         type_: &'static str,
         id: String,
@@ -157,7 +154,7 @@ impl<S: Schema> ActiveGames<S> {
         Ok(())
     }
 
-    pub fn action<G: GameState + 'static>(
+    pub fn action<G: GameHooks + 'static>(
         &self,
         type_: &'static str,
         id: &str,
@@ -191,34 +188,4 @@ impl<S: Schema> ActiveGames<S> {
 pub enum InboundAction {
     Raw(Vec<u8>),
     Stop,
-}
-
-pub struct GameStateRuntime<S>
-where
-    S: GameState,
-{
-    state: S,
-    action_rx: tokio::sync::mpsc::UnboundedReceiver<S::Change>,
-}
-
-impl<S> GameStateRuntime<S>
-where
-    S: GameState,
-{
-    pub fn new(state: S) -> (Self, UnboundedSender<S::Change>) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<S::Change>();
-        let self_ = Self {
-            state,
-            action_rx: rx,
-        };
-
-        (self_, tx)
-    }
-
-    pub async fn run(mut self) {
-        // Add stop flag
-        while let Some(change) = self.action_rx.recv().await {
-            self.state.on_change(change);
-        }
-    }
 }

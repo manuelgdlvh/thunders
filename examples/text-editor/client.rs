@@ -8,7 +8,6 @@ use iced::{Alignment, Element, Length, Subscription, Task, stream};
 use rand::RngCore;
 use thunders::api::schema::json::Json;
 use thunders::client::protocol::ws::WebSocketClientProtocol;
-use thunders::client::state::GameState;
 use thunders::client::{ThundersClient, ThundersClientBuilder};
 
 const LOBBY_TYPE: &str = "text_editor";
@@ -201,7 +200,7 @@ pub enum TextEditorChange {
     Full(String),
 }
 
-impl GameState for TextEditor {
+impl thunders::client::core::GameHooks for TextEditor {
     type Change = TextEditorChange;
     type Action = TextEditorAction;
     type Options = ();

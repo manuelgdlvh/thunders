@@ -10,24 +10,23 @@ use uuid::Uuid;
 
 use crate::{
     api::schema::BorrowedSerialize,
-    client::reply::{Reply, ReplyManager},
+    client::{
+        core::{ActiveGames, GameHooks, InboundAction},
+        reply::{Reply, ReplyManager},
+    },
 };
 use crate::{
     api::{
         message::{InputMessage, OutputMessage},
         schema::{Deserialize, Schema, Serialize},
     },
-    client::{
-        error::ThundersClientError,
-        protocol::ClientProtocol,
-        state::{ActiveGames, GameState, InboundAction},
-    },
+    client::{error::ThundersClientError, protocol::ClientProtocol},
 };
 
+pub mod core;
 pub mod error;
 pub mod protocol;
 mod reply;
-pub mod state;
 
 pub type ThundersClientResult = Result<(), ThundersClientError>;
 
@@ -122,7 +121,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
         }
     }
 
-    pub async fn create<G: GameState + Send + Sync + 'static>(
+    pub async fn create<G: GameHooks + Send + Sync + 'static>(
         &self,
         type_: &'static str,
         id: &str,
@@ -177,7 +176,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
         result
     }
 
-    pub async fn join<G: GameState + Send + Sync + 'static>(
+    pub async fn join<G: GameHooks + Send + Sync + 'static>(
         &self,
         type_: &'static str,
         id: &str,
@@ -221,7 +220,7 @@ impl<S: Schema + 'static> ThundersClient<S> {
         result
     }
 
-    pub fn action<G: GameState + 'static>(
+    pub fn action<G: GameHooks + 'static>(
         &self,
         type_: &'static str,
         id: &str,

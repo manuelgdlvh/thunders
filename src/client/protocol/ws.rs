@@ -6,7 +6,11 @@ use tokio_tungstenite::{
     tungstenite::{Bytes, Message, client::IntoClientRequest},
 };
 
-use crate::client::{InternalEvent, reply::ReplyManager};
+use crate::client::{
+    InternalEvent,
+    core::{ActiveGames, InboundAction},
+    reply::ReplyManager,
+};
 use crate::{
     api::{
         message::OutputMessage,
@@ -15,7 +19,6 @@ use crate::{
     client::{
         error::ThundersClientError,
         protocol::{ClientProtocol, ClientProtocolHandle},
-        state::{ActiveGames, InboundAction},
     },
 };
 

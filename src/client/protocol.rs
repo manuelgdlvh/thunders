@@ -1,16 +1,14 @@
 use std::sync::Arc;
 
 use crate::client::InternalEvent;
+use crate::client::core::{ActiveGames, InboundAction};
 use crate::client::reply::ReplyManager;
 use crate::{
     api::{
         message::OutputMessage,
         schema::{Deserialize, Schema},
     },
-    client::{
-        error::ThundersClientError,
-        state::{ActiveGames, InboundAction},
-    },
+    client::error::ThundersClientError,
 };
 use tokio::sync::mpsc::UnboundedSender;
 

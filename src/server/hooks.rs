@@ -7,32 +7,23 @@ pub trait GameHooks: Send + 'static {
     type Action: Send + std::fmt::Debug;
     type Options: Default + std::fmt::Debug;
 
-    fn build(host_id: u64, options: Self::Options) -> Self;
+    fn build(options: Self::Options) -> Self;
 
-    fn tick(
+    fn on_tick(
         &mut self,
-        player_cxts: &HashMap<u64, Arc<PlayerContext>>,
+        players_cxts: &HashMap<u64, Arc<PlayerContext>>,
         actions: Vec<(u64, Self::Action)>,
     ) -> Option<Vec<Diff<Self::Delta>>>;
 
-    fn join(&mut self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>>;
-    fn leave(&mut self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>>;
-    fn finish(&self) -> (bool, Option<Diff<Self::Delta>>);
+    fn on_join(&mut self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>>;
+    fn on_leave(&mut self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>>;
+    fn is_finished(&self) -> (bool, Option<Diff<Self::Delta>>);
 }
 
 pub enum Diff<D> {
     All { delta: D },
-    Target { ids: Vec<u64>, delta: D },
-}
-
-#[derive(Debug)]
-pub enum Event<H>
-where
-    H: GameHooks,
-{
-    Action(H::Action),
-    Join(Arc<PlayerContext>),
-    Leave(u64),
+    TargetUnique { id: u64, delta: D },
+    TargetList { ids: Vec<u64>, delta: D },
 }
 
 #[derive(Debug)]

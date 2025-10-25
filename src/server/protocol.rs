@@ -87,7 +87,7 @@ pub fn process_message<S: Schema>(
                     session_manager.subscribe(player_cxt.id(), type_, id);
 
                     // TODO: Check result to send success or not
-                    handler.register(Arc::clone(&player_cxt), id, options);
+                    handler.register(Arc::clone(player_cxt), id, options);
 
                     session_manager.send(
                         player_cxt.id(),

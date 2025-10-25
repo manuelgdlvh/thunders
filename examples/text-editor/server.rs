@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use iced::widget::sensor::Key;
 use thunders::{
     api::schema::json::Json,
     server::{
@@ -19,11 +18,11 @@ const IP_ADDRESS: &str = "127.0.0.1";
 #[tokio::main]
 pub async fn main() -> ThundersServerResult {
     ThundersServer::new(WebSocketProtocol::new(IP_ADDRESS, 8080), Json::default())
-        .register::<SyncRuntime, TextEditor>(
+        .register::<SyncRuntime<_>, TextEditor>(
             LOBBY_TYPE,
             Settings {
-                max_action_await_millis: 2000,
-                tick_interval_millis: 16,
+                tick_no_action_millis: 2000,
+                tick_millis: 16,
             },
         )
         .run()
@@ -44,7 +43,7 @@ pub enum TextEditorChange {
     Full(String),
 }
 
-impl GameHooks for TextEditor {
+impl thunders::server::hooks::GameHooks for TextEditor {
     type Delta = TextEditorChange;
     type Action = TextEditorAction;
     type Options = ();
@@ -55,48 +54,44 @@ impl GameHooks for TextEditor {
         }
     }
 
-    fn diff(
-        &self,
-        player_cxts: &HashMap<u64, Arc<PlayerContext>>,
-        actions: &[(u64, Self::Action)],
-    ) -> Vec<Diff<Self::Delta>> {
-        let text_ref = actions.last().expect("Should have at least one action");
-
-        match &text_ref.1 {
-            TextEditorAction::TextReplace(text) => {
-                vec![Diff::Target {
-                    ids: player_cxts
-                        .keys()
-                        .filter(|id| !text_ref.0.eq(*id))
-                        .map(|id| *id)
-                        .collect::<Vec<_>>(),
-                    delta: TextEditorChange::Full(text.to_string()),
-                }]
-            }
-        }
-    }
-
-    fn join(&self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>> {
-        Some(vec![Diff::Target {
-            ids: vec![player_cxt.id()],
+    fn on_join(&mut self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>> {
+        Some(vec![Diff::TargetUnique {
+            id: player_cxt.id(),
             delta: TextEditorChange::Full(self.content.to_string()),
         }])
     }
 
-    fn leave(&self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>> {
+    fn on_leave(&mut self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>> {
         None
     }
 
-    fn update(&mut self, mut actions: Vec<(u64, Self::Action)>) {
-        println!("Processing update");
-        match actions.pop().expect("Should have at least one action").1 {
-            TextEditorAction::TextReplace(text) => {
-                self.content = text;
+    fn on_tick(
+        &mut self,
+        players_cxts: &HashMap<u64, Arc<PlayerContext>>,
+        mut actions: Vec<(u64, Self::Action)>,
+    ) -> Option<Vec<Diff<Self::Delta>>> {
+        if actions.is_empty() {
+            None
+        } else {
+            let (p_id, action) = actions.pop().expect("Should have at least one action");
+            match action {
+                TextEditorAction::TextReplace(text) => {
+                    self.content = text;
+                }
             }
+
+            Some(vec![Diff::TargetList {
+                ids: players_cxts
+                    .keys()
+                    .filter(|id| !p_id.eq(*id))
+                    .map(|id| *id)
+                    .collect::<Vec<_>>(),
+                delta: TextEditorChange::Full(self.content.clone()),
+            }])
         }
     }
 
-    fn finish(&self) -> (bool, Option<Diff<Self::Delta>>) {
+    fn is_finished(&self) -> (bool, Option<Diff<Self::Delta>>) {
         (false, None)
     }
 }

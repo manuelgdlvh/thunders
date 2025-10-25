@@ -13,29 +13,35 @@ use crate::{
     },
     server::{
         context::PlayerContext,
-        hooks::{Diff, DiffNotification, Event, GameHooks},
+        hooks::{Diff, DiffNotification, GameHooks},
         protocol::SessionManager,
-        runtime::{GameHandle, GameRuntime},
+        runtime::{GameHandle, GameRuntime, RuntimeAction},
     },
 };
 
-pub struct SyncRuntime {
+pub struct SyncRuntime<H>
+where
+    H: GameHooks,
+{
     type_: &'static str,
     id: String,
-    host_id: u64,
-    action_timeout: Duration,
+    hooks: H,
+    tick_no_action: Duration,
     tick: Duration,
     session_manager: Arc<SessionManager>,
-    players_cxt: HashMap<u64, Arc<PlayerContext>>,
+    players_cxts: HashMap<u64, Arc<PlayerContext>>,
 }
 
 pub struct Settings {
-    pub max_action_await_millis: u64,
-    pub tick_interval_millis: u64,
+    pub tick_no_action_millis: u64,
+    pub tick_millis: u64,
 }
 
-impl SyncRuntime {
-    fn notify<H: GameHooks, S: Schema>(&self, diff: Diff<H::Delta>)
+impl<H> SyncRuntime<H>
+where
+    H: GameHooks,
+{
+    fn notify<S: Schema>(&self, diff: Diff<H::Delta>)
     where
         H::Delta: Serialize<S>,
     {
@@ -43,9 +49,13 @@ impl SyncRuntime {
             Diff::All { delta } => {
                 let diff = DiffNotification::new(self.type_, self.id.as_str(), delta.serialize());
                 self.session_manager
-                    .send_all(self.players_cxt.keys(), &diff);
+                    .send_all(self.players_cxts.keys(), &diff);
             }
-            Diff::Target { ids, delta } => {
+            Diff::TargetUnique { id, delta } => {
+                let diff = DiffNotification::new(self.type_, self.id.as_str(), delta.serialize());
+                self.session_manager.send(id, &diff);
+            }
+            Diff::TargetList { ids, delta } => {
                 let diff = DiffNotification::new(self.type_, self.id.as_str(), delta.serialize());
                 self.session_manager.send_all(ids.iter(), &diff);
             }
@@ -53,7 +63,7 @@ impl SyncRuntime {
     }
 }
 
-impl<H, S> GameRuntime<H, S> for SyncRuntime
+impl<H, S> GameRuntime<H, S> for SyncRuntime<H>
 where
     H: GameHooks,
     S: Schema,
@@ -68,97 +78,95 @@ where
     fn build(
         type_: &'static str,
         id: String,
-        host_id: u64,
+        hooks: H,
         settings: &Self::Settings,
         session_manager: Arc<SessionManager>,
     ) -> Self {
         Self {
             id,
             type_,
-            host_id,
-            action_timeout: Duration::from_millis(settings.max_action_await_millis),
-            tick: Duration::from_millis(settings.tick_interval_millis),
+            hooks,
+            tick_no_action: Duration::from_millis(settings.tick_no_action_millis),
+            tick: Duration::from_millis(settings.tick_millis),
             session_manager,
-            players_cxt: Default::default(),
+            players_cxts: Default::default(),
         }
     }
 
-    fn start(mut self, options: <H as GameHooks>::Options) -> Self::Handle {
-        let mut hooks = H::build(self.host_id, options);
-        let (actions_tx, actions_rx) = mpsc::channel::<(u64, Event<H>)>();
+    fn start(mut self) -> Self::Handle {
+        let (action_tx, action_rx) = mpsc::channel::<(u64, RuntimeAction<H>)>();
         let r_handle = thread::spawn(move || {
             let mut actions_buffer = Vec::new();
             let mut now;
             let mut tick;
 
             loop {
-                let (is_finished, diff_opt) = hooks.finish();
-
+                let (is_finished, diff_opt) = self.hooks.is_finished();
                 if is_finished {
                     if let Some(diff) = diff_opt {
-                        self.notify::<H, S>(diff);
+                        self.notify::<S>(diff);
                     }
 
                     let diff = DiffNotification::finish(self.type_, self.id.as_str());
                     self.session_manager
-                        .send_all(self.players_cxt.keys(), &diff);
+                        .send_all(self.players_cxts.keys(), &diff);
                     break;
                 }
-                if let Ok(event) = actions_rx.recv_timeout(self.action_timeout) {
+                if let Ok(event) = action_rx.recv_timeout(self.tick_no_action) {
                     match event.1 {
-                        Event::Action(action) => {
+                        RuntimeAction::Action(action) => {
                             actions_buffer.push((event.0, action));
                             now = Instant::now();
                             tick = self.tick;
                         }
 
-                        Event::Leave(id) => {
-                            if let Some(player_context) = self.players_cxt.remove(&id)
-                                && let Some(diff) = hooks.leave(player_context.as_ref())
+                        RuntimeAction::Leave(id) => {
+                            if let Some(player_context) = self.players_cxts.remove(&id)
+                                && let Some(diff) = self.hooks.on_leave(player_context.as_ref())
                             {
-                                self.notify::<H, S>(diff);
+                                self.notify::<S>(diff);
                             }
 
                             continue;
                         }
 
-                        Event::Join(cxt) => {
-                            self.players_cxt.insert(cxt.id(), Arc::clone(&cxt));
-                            if let Some(diffs) = hooks.join(cxt.as_ref()) {
+                        RuntimeAction::Join(cxt) => {
+                            self.players_cxts.insert(cxt.id(), Arc::clone(&cxt));
+                            if let Some(diffs) = self.hooks.on_join(cxt.as_ref()) {
                                 for diff in diffs {
-                                    self.notify::<H, S>(diff);
+                                    self.notify::<S>(diff);
                                 }
                             }
                             continue;
                         }
                     }
                 } else {
-                    if let Some(diffs) = hooks.tick(&self.players_cxt, vec![]) {
+                    if let Some(diffs) = self.hooks.on_tick(&self.players_cxts, vec![]) {
                         for diff in diffs {
-                            self.notify::<H, S>(diff);
+                            self.notify::<S>(diff);
                         }
                     }
                     continue;
                 }
 
-                while let Ok(event) = actions_rx.recv_timeout(tick) {
+                while let Ok(event) = action_rx.recv_timeout(tick) {
                     match event.1 {
-                        Event::Action(action) => {
+                        RuntimeAction::Action(action) => {
                             actions_buffer.push((event.0, action));
                         }
-                        Event::Leave(id) => {
-                            if let Some(player_context) = self.players_cxt.remove(&id)
-                                && let Some(diff) = hooks.leave(player_context.as_ref())
+                        RuntimeAction::Leave(id) => {
+                            if let Some(player_context) = self.players_cxts.remove(&id)
+                                && let Some(diff) = self.hooks.on_leave(player_context.as_ref())
                             {
-                                self.notify::<H, S>(diff);
+                                self.notify::<S>(diff);
                             }
                         }
 
-                        Event::Join(cxt) => {
-                            self.players_cxt.insert(cxt.id(), Arc::clone(&cxt));
-                            if let Some(diffs) = hooks.join(cxt.as_ref()) {
+                        RuntimeAction::Join(cxt) => {
+                            self.players_cxts.insert(cxt.id(), Arc::clone(&cxt));
+                            if let Some(diffs) = self.hooks.on_join(cxt.as_ref()) {
                                 for diff in diffs {
-                                    self.notify::<H, S>(diff);
+                                    self.notify::<S>(diff);
                                 }
                             }
                         }
@@ -171,16 +179,19 @@ where
                     }
                 }
 
-                if let Some(diffs) = hooks.tick(&self.players_cxt, mem::take(&mut actions_buffer)) {
+                if let Some(diffs) = self
+                    .hooks
+                    .on_tick(&self.players_cxts, mem::take(&mut actions_buffer))
+                {
                     for diff in diffs {
-                        self.notify::<H, S>(diff);
+                        self.notify::<S>(diff);
                     }
                 }
             }
         });
 
         SyncGameHandle {
-            actions: actions_tx,
+            action_tx,
             _r_handle: r_handle,
         }
     }
@@ -190,7 +201,7 @@ pub struct SyncGameHandle<H>
 where
     H: GameHooks,
 {
-    actions: mpsc::Sender<(u64, Event<H>)>,
+    action_tx: mpsc::Sender<(u64, RuntimeAction<H>)>,
     _r_handle: JoinHandle<()>,
 }
 
@@ -198,21 +209,21 @@ impl<H> GameHandle<H> for SyncGameHandle<H>
 where
     H: GameHooks,
 {
-    fn event(&self, p_id: u64, event: Event<H>) {
-        match &event {
-            Event::Action(action) => {
+    fn send(&self, p_id: u64, r_action: RuntimeAction<H>) {
+        match &r_action {
+            RuntimeAction::Action(action) => {
                 log::trace!("SERVER received action request. Action: {action:?} ");
             }
-            Event::Join(cxt) => {
+            RuntimeAction::Join(cxt) => {
                 log::trace!("SERVER received join request. PlayerContext: {cxt:?} ");
             }
 
-            Event::Leave(id) => {
+            RuntimeAction::Leave(id) => {
                 log::trace!("SERVER received leave request. PlayerId: {id} ");
             }
         }
 
-        if self.actions.send((p_id, event)).is_err() {
+        if self.action_tx.send((p_id, r_action)).is_err() {
             log::warn!("Game runtime stopped, skipping action.");
         }
     }

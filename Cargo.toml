@@ -28,11 +28,6 @@ ws = ["dep:tokio-tungstenite"]
 json = ["dep:serde", "dep:serde_json"]
 
 [[example]]
-name = "chat"
-path = "examples/chat.rs"
-required-features = ["client", "server", "ws", "json"]
-
-[[example]]
 name = "text-editor-client"
 path = "examples/text-editor/client.rs"
 required-features = ["client", "ws", "json"]

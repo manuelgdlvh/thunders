@@ -4,10 +4,7 @@ use ::rand::{RngCore, thread_rng};
 use macroquad::prelude::*;
 use thunders::{
     api::schema::json::Json,
-    client::{
-        ThundersClient, ThundersClientBuilder, protocol::ws::WebSocketClientProtocol,
-        state::GameState,
-    },
+    client::{ThundersClient, ThundersClientBuilder, protocol::ws::WebSocketClientProtocol},
     server::{
         ThundersServer,
         context::PlayerContext,
@@ -122,11 +119,11 @@ fn start_server() {
 
         rt.block_on(async {
             let _ = ThundersServer::new(WebSocketProtocol::new("127.0.0.1", 8080), Json::default())
-                .register::<SyncRuntime, ArkanoidServer>(
+                .register::<SyncRuntime<_>, ArkanoidServer>(
                     LOBBY_TYPE,
                     Settings {
-                        max_action_await_millis: (DELTA * 1000.0) as u64,
-                        tick_interval_millis: (DELTA * 1000.0) as u64,
+                        tick_no_action_millis: (DELTA * 1000.0) as u64,
+                        tick_millis: (DELTA * 1000.0) as u64,
                     },
                 )
                 .run()
@@ -222,61 +219,65 @@ pub struct ArkanoidServer {
     ball: Ball,
     platforms: HashMap<u64, PlatformPosition>,
     blocks: [[bool; BLOCKS_W]; BLOCKS_H],
-    host_id: u64,
+    platform_host_id: Option<u64>,
 }
 
-impl GameHooks for ArkanoidServer {
+impl thunders::server::hooks::GameHooks for ArkanoidServer {
     type Options = ();
     type Action = ArkanoidAction;
     type Delta = ArkanoidDiff;
 
-    fn build(host_id: u64, _options: Self::Options) -> Self {
-        let mut platforms = HashMap::new();
-        platforms.insert(host_id, PlatformPosition(12.));
+    fn build(options: Self::Options) -> Self {
         Self {
             ball: Ball {
                 position: BallPosition(12., 7.),
                 vector: BallVector(3.5, -3.5),
             },
-            platforms,
+            platforms: HashMap::new(),
             blocks: [[true; BLOCKS_W]; BLOCKS_H],
-            host_id,
+            platform_host_id: None,
         }
     }
 
-    fn join(&mut self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>> {
-        if !self.platforms.contains_key(&player_cxt.id()) {
+    fn on_join(&mut self, player_cxt: &PlayerContext) -> Option<Vec<Diff<Self::Delta>>> {
+        if self.platform_host_id.is_none() {
+            self.platform_host_id = Some(player_cxt.id());
+            self.platforms
+                .insert(player_cxt.id(), PlatformPosition(12.));
+            None
+        } else {
             let mut result = vec![];
 
-            result.push(Diff::Target {
-                ids: vec![player_cxt.id()],
+            result.push(Diff::TargetUnique {
+                id: player_cxt.id(),
                 delta: ArkanoidDiff::Full {
                     ball_position: (self.ball.position.0, self.ball.position.1),
                     ball_vector: (self.ball.vector.0, self.ball.vector.1),
                     blocks: self.blocks,
-                    away_position: self.platforms.get(&self.host_id).unwrap().0,
+                    away_position: self
+                        .platforms
+                        .get(self.platform_host_id.as_ref().unwrap())
+                        .unwrap()
+                        .0,
                 },
             });
 
-            result.push(Diff::Target {
-                ids: vec![self.host_id],
+            result.push(Diff::TargetUnique {
+                id: self.platform_host_id.unwrap(),
                 delta: ArkanoidDiff::AwayJoined(12.),
             });
 
             self.platforms
                 .insert(player_cxt.id(), PlatformPosition(12.));
-
             Some(result)
-        } else {
-            None
         }
     }
 
-    fn leave(&mut self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>> {
+    fn on_leave(&mut self, player_cxt: &PlayerContext) -> Option<Diff<Self::Delta>> {
         None
     }
 
-    fn finish(&self) -> (bool, Option<Diff<Self::Delta>>) {
+    fn is_finished(&self) -> (bool, Option<Diff<Self::Delta>>) {
         if self.ball.position.1 >= SCR_H {
             (true, None)
         } else {
@@ -284,7 +285,7 @@ impl GameHooks for ArkanoidServer {
         }
     }
 
-    fn tick(
+    fn on_tick(
         &mut self,
         player_cxts: &HashMap<u64, std::sync::Arc<PlayerContext>>,
         actions: Vec<(u64, Self::Action)>,
@@ -301,7 +302,7 @@ impl GameHooks for ArkanoidServer {
                         .collect();
                     if let Some(platform) = self.platforms.get_mut(&p_id) {
                         platform.0 -= 10.0 * DELTA;
-                        diffs.push(Diff::Target {
+                        diffs.push(Diff::TargetList {
                             ids,
                             delta: ArkanoidDiff::AwayPositionChanged(platform.0),
                         });
@@ -317,7 +318,7 @@ impl GameHooks for ArkanoidServer {
                         .collect();
                     if let Some(platform) = self.platforms.get_mut(&p_id) {
                         platform.0 += 10.0 * DELTA;
-                        diffs.push(Diff::Target {
+                        diffs.push(Diff::TargetList {
                             ids,
                             delta: ArkanoidDiff::AwayPositionChanged(platform.0),
                         });
@@ -402,7 +403,7 @@ pub struct ArkanoidGame {
     blocks: [[bool; BLOCKS_W]; BLOCKS_H],
 }
 
-impl GameState for ArkanoidGame {
+impl thunders::client::core::GameHooks for ArkanoidGame {
     type Change = ArkanoidDiff;
     type Action = ArkanoidAction;
     type Options = ();
